@@ -3,12 +3,18 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-// --- Render Keep Alive Server ---
-http.createServer((req, res) => {
+// --- ဒီအပိုင်းက Render မှာ Bot မရပ်သွားအောင် လုပ်ပေးတာပါ (မဖြုတ်ပါနဲ့) ---
+const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.write('AI Bot is Running!');
   res.end();
-}).listen(process.env.PORT || 8080);
+});
+
+// Render ရဲ့ Port ကို နားထောင်ခြင်း
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 
 // --- Configuration ---
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
@@ -81,19 +87,17 @@ async function monitoringLoop(chatId) {
   }
 }
 
-// --- Handlers (Fix Button Clicks) ---
+// --- Handlers ---
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
   if (!text) return;
 
-  // 1. Start Command
   if (text === '/start') {
     delete user_db[chatId];
     return bot.sendMessage(chatId, "🤖 **BigWin AI Pro**\n\nLogin ဝင်ရန် ဖုန်းနံပါတ်ပေးပါ (09xxx):");
   }
 
-  // 2. Results History
   if (text === "📊 Results History") {
     const data = user_db[chatId];
     const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, language: 0, typeId: 1 }, data?.token);
@@ -108,30 +112,29 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, "❌ အချက်အလက်ယူမရပါ။");
   }
 
-  // 3. Prediction History
   if (text === "🧠 Prediction History") {
     const logs = user_db[chatId]?.predictions || [];
     if (logs.length === 0) return bot.sendMessage(chatId, "မှတ်တမ်းမရှိသေးပါ။");
     return bot.sendMessage(chatId, "🧠 **AI Log (Last 10)**\n\n" + logs.slice(-10).join("\n"));
   }
 
-  // 4. Start/Stop AI
   if (text === "🚀 Start AI") {
     if (!user_db[chatId]?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ။");
     user_db[chatId].running = true;
     monitoringLoop(chatId);
     return bot.sendMessage(chatId, "🚀 **AI Monitoring စတင်ပါပြီ**");
   }
+
   if (text === "🛑 Stop AI") {
     if (user_db[chatId]) user_db[chatId].running = false;
     return bot.sendMessage(chatId, "🛑 AI Monitoring ရပ်တန့်လိုက်ပါပြီ။");
   }
 
-  // 5. Login Process
   if (/^\d{9,11}$/.test(text) && !user_db[chatId]) {
     user_db[chatId] = { phone: text, running: false, predictions: [] };
     return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
   }
+
   if (user_db[chatId] && !user_db[chatId].token) {
     const payload = { phonetype: -1, language: 0, logintype: "mobile", username: "95" + user_db[chatId].phone.replace(/^0/, ''), pwd: text };
     const res = await callApi("Login", payload);
@@ -144,5 +147,3 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, "❌ Password မှားယွင်းပါသည်။ /start ပြန်လုပ်ပါ။");
   }
 });
-
-console.log("--- AI Bot is now Online ---");
