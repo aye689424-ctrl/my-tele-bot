@@ -64,7 +64,7 @@ function aiBrainConsensus(history) {
 async function monitoringLoop(chatId) {
   while (user_db[chatId] && user_db[chatId].running) {
     const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: 1 }, data.token);
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 30, language: 0, typeId: 1 }, data.token);
 
     if (res && res.msgCode === 0) {
       const history = res.data.list;
@@ -74,7 +74,7 @@ async function monitoringLoop(chatId) {
         if (data.last_pred) {
           const realRes = parseInt(history[0].number) >= 5 ? "Big" : "Small";
           const isWin = data.last_pred === realRes ? "✅ WIN" : "❌ LOSS";
-          data.predictions.push(`🔹 Issue: ${currIssue.slice(-3)} | P: ${data.last_pred} | R: ${realRes} | ${isWin}`);
+          data.predictions.push(`🔹 Issue: ${currIssue.slice(-2)} | P: ${data.last_pred} | R: ${realRes} | ${isWin}`);
         }
         const { finalDecision, confidence } = aiBrainConsensus(history);
         data.last_pred = finalDecision;
@@ -100,7 +100,7 @@ bot.on('message', async (msg) => {
 
   if (text === "📊 Results History") {
     const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, language: 0, typeId: 1 }, data?.token);
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 100, language: 0, typeId: 1 }, data?.token);
     if (res && res.msgCode === 0) {
       let txt = "📊 **Game Results (Last 10)**\n\n";
       res.data.list.forEach(i => {
@@ -115,7 +115,7 @@ bot.on('message', async (msg) => {
   if (text === "🧠 Prediction History") {
     const logs = user_db[chatId]?.predictions || [];
     if (logs.length === 0) return bot.sendMessage(chatId, "မှတ်တမ်းမရှိသေးပါ။");
-    return bot.sendMessage(chatId, "🧠 **AI Log (Last 10)**\n\n" + logs.slice(-10).join("\n"));
+    return bot.sendMessage(chatId, "🧠 **AI Log (Last 100)**\n\n" + logs.slice(-100).join("\n"));
   }
 
   if (text === "🚀 Start AI") {
