@@ -6,14 +6,18 @@ const dns = require('dns');
 
 dns.setDefaultResultOrder('ipv4first');
 
-http.createServer((req, res) => { res.end('BigWin Pro Console v6.5 Active'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('BigWin Pro Console v6.6 Active'); }).listen(process.env.PORT || 8080);
 
-// ✅ NEW TOKEN
 const token = '8676836403:AAF-3RPr09Um45gDtI74YfnA05lsMnMnIQ8';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
+
+// Generate device ID (like website)
+function generateDeviceId() {
+    return crypto.randomBytes(16).toString('hex');
+}
 
 function signMd5(data) {
     let temp = { ...data };
@@ -46,6 +50,25 @@ async function callApi(endpoint, payload, authToken = null) {
         console.log(`API Error:`, e.code);
         return { msgCode: -1, msg: "Network Error" }; 
     }
+}
+
+// ✅ FIXED LOGIN FUNCTION (based on your payload)
+async function doLogin(username, password) {
+    const deviceId = generateDeviceId();
+    
+    const loginPayload = {
+        "username": username,
+        "pwd": password,
+        "phonetype": 1,              // ✅ ခင်ဗျား payload အတိုင်း 1
+        "logintype": "mobile",
+        "packId": "",                // ✅ empty string
+        "deviceId": deviceId,        // ✅ generate new device ID
+        "language": 7
+    };
+    
+    console.log("Login Payload:", JSON.stringify(loginPayload, null, 2));
+    
+    return await callApi("Login", loginPayload);
 }
 
 function getDecision(history, formulaType) {
@@ -145,12 +168,12 @@ bot.on('message', async (msg) => {
 
     if (text === '/start') {
         return bot.sendMessage(chatId, 
-            "🤖 **BigWin Pro Console v6.5**\n\n" +
+            "🤖 **BigWin Pro Console v6.6**\n\n" +
             "**Login ဝင်ရန်:**\n" +
-            "1️⃣ ဖုန်းနံပါတ် (95xxxxxxxxx ပုံစံ)\n" +
+            "1️⃣ ဖုန်းနံပါတ် (959xxxxxxx ပုံစံ)\n" +
             "2️⃣ စကားဝှက်\n\n" +
-            "ဥပမာ: `959771234567`\n\n" +
-            "ဖုန်းနံပါတ်ပို့ပါ:", 
+            "ဥပမာ: `959696740902`\n\n" +
+            "**ဖုန်းနံပါတ်ပို့ပါ:**", 
             { reply_markup: { remove_keyboard: true } }
         );
     }
@@ -203,66 +226,36 @@ bot.on('message', async (msg) => {
         }
     }
 
-    // ========== FIXED LOGIN FOR +95 FORMAT ==========
+    // ========== LOGIN WITH CORRECT PAYLOAD ==========
     
-    // Step 1: Get phone number (ဖုန်းနံပါတ်လက်ခံမယ်)
+    // Step 1: Get phone number
     if (!user_db[chatId].token && !user_db[chatId].awaitingPassword) {
-        // Remove + sign and non-digits
         let cleanPhone = text.replace(/[^0-9]/g, '');
         
-        // Check if it's a valid phone (9-12 digits)
-        if (cleanPhone.length >= 9 && cleanPhone.length <= 12) {
+        // Must start with 95 and be 12 digits
+        if (cleanPhone.length === 12 && cleanPhone.startsWith('95')) {
             user_db[chatId].tempPhone = cleanPhone;
             user_db[chatId].awaitingPassword = true;
             return bot.sendMessage(chatId, "🔐 **စကားဝှက်ပို့ပါ:**");
         } else {
-            // Not a phone number, ignore
+            bot.sendMessage(chatId, "❌ ဖုန်းနံပါတ်ပုံစံမှားပါသည်။\n\nဥပမာ: `959696740902`");
             return;
         }
     }
     
-    // Step 2: Get password and login (စကားဝှက်လက်ခံမယ်)
+    // Step 2: Get password and login
     if (user_db[chatId].awaitingPassword && !user_db[chatId].token) {
-        const rawPhone = user_db[chatId].tempPhone;
+        const phone = user_db[chatId].tempPhone;
+        const password = text;
         
-        // Format phone number for API (remove 0, add 95 if needed)
-        let formattedPhone = rawPhone;
+        bot.sendMessage(chatId, "⏳ Login လုပ်နေပါသည်...");
         
-        // If starts with 95, keep as is
-        if (rawPhone.startsWith('95')) {
-            formattedPhone = rawPhone;
-        }
-        // If starts with 09, convert to 95
-        else if (rawPhone.startsWith('09')) {
-            formattedPhone = '95' + rawPhone.substring(2);
-        }
-        // If starts with 9 (without 0)
-        else if (rawPhone.startsWith('9')) {
-            formattedPhone = '95' + rawPhone.substring(1);
-        }
-        // If starts with 0
-        else if (rawPhone.startsWith('0')) {
-            formattedPhone = '95' + rawPhone.substring(1);
-        }
-        // Otherwise add 95
-        else {
-            formattedPhone = '95' + rawPhone;
-        }
+        // Use the correct login function
+        const loginRes = await doLogin(phone, password);
         
-        console.log(`📱 Login: ${rawPhone} → ${formattedPhone}`);
+        console.log("Login Result:", JSON.stringify(loginRes));
         
-        // Send login request
-        const loginRes = await callApi("Login", { 
-            phonetype: -1, 
-            language: 7, 
-            logintype: "mobile", 
-            username: formattedPhone, 
-            pwd: text 
-        });
-        
-        console.log(`📡 Login Response:`, JSON.stringify(loginRes));
-        
-        if (loginRes?.msgCode === 0) {
+        if (loginRes?.msgCode === 0 && loginRes?.data?.token) {
             user_db[chatId].token = loginRes.data.tokenHeader + loginRes.data.token;
             user_db[chatId].userId = loginRes.data.userId;
             delete user_db[chatId].tempPhone;
@@ -281,9 +274,9 @@ bot.on('message', async (msg) => {
             
             let errorMsg = "❌ **Login မှားယွင်းနေပါသည်။**\n\n";
             errorMsg += "**စစ်ဆေးရန်:**\n";
-            errorMsg += "• ဖုန်းနံပါတ်: `" + formattedPhone + "`\n";
+            errorMsg += `• ဖုန်းနံပါတ်: \`${phone}\`\n`;
             errorMsg += "• စကားဝှက်: မှန်ကန်သလား\n\n";
-            errorMsg += "**Website မှာ ဝင်ကြည့်ပါ:**\n";
+            errorMsg += "**Website မှာ ဝင်ကြည့်ပါ။**\n";
             errorMsg += "အဲဒီအကောင့်နဲ့ ဝင်လို့ရလား စစ်ပါ။\n\n";
             errorMsg += "/start ပြန်လုပ်ပါ။";
             
@@ -306,5 +299,6 @@ bot.on('callback_query', (q) => {
     bot.sendMessage(chatId, `🔄 Updated: Formula=${user_db[chatId].formula}, Mode=${user_db[chatId].typeId === 30 ? "30s" : "1min"}`);
 });
 
-console.log('🤖 BigWin Pro Console v6.5 Started!');
-console.log('📱 Phone format: 95xxxxxxxxx (9-12 digits)');
+console.log('🤖 BigWin Pro Console v6.6 Started!');
+console.log('📱 Phone format: 95xxxxxxxxx (12 digits)');
+console.log('🔐 Using phonetype: 1, deviceId: auto-generated');
