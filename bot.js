@@ -30,11 +30,11 @@ function signMd5(data) {
 
 async function callApi(endpoint, payload, authToken = null) {
   payload.timestamp = Math.floor(Date.now() / 1000);
-  payload.random = "b05034ba4a2642009350ee863f29e2e9";
+  // ပုံထဲက random key အသစ်ကို အသုံးပြုထားပါတယ်
+  payload.random = "b535e220303e4e6e8853dbe9327540d0"; 
   payload.signature = signMd5(payload);
   const headers = { 
     "Content-Type": "application/json;charset=UTF-8",
-    "Accept": "application/json, text/plain, */*",
     "Origin": "https://www.777bigwingame.app",
     "Referer": "https://www.777bigwingame.app/",
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
@@ -65,7 +65,8 @@ function aiBrainConsensus(history) {
 async function monitoringLoop(chatId) {
   while (user_db[chatId] && user_db[chatId].running) {
     const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: data.typeId }, data.token);
+    // typeId ကို 30 (30s) သို့မဟုတ် 1 (1Min) အဖြစ် သတ်မှတ်ပေးပါသည်
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 7, typeId: data.typeId }, data.token);
     
     if (res && res.msgCode === 0 && res.data.list.length > 0) {
       const history = res.data.list;
@@ -84,7 +85,8 @@ async function monitoringLoop(chatId) {
         bot.sendMessage(chatId, `🔔 **AI [${data.mode}]**\n🎯 Issue: \`${nextIssue.slice(-3)}\`\n🧠 Decision: **${decision}**\n📊 Pattern: \`${pattern}\``, { parse_mode: 'Markdown' });
       }
     }
-    await new Promise(r => setTimeout(r, data.typeId === 10 ? 3000 : 10000));
+    // 30s ဆိုရင် ၃ စက္ကန့်၊ 1Min ဆိုရင် ၈ စက္ကန့် စောင့်ပါသည်
+    await new Promise(r => setTimeout(r, data.typeId === 30 ? 3000 : 8000));
   }
 }
 
@@ -95,11 +97,11 @@ bot.on('message', async (msg) => {
 
   if (text === '/start') {
     delete user_db[chatId];
-    return bot.sendMessage(chatId, "🤖 **BigWin AI v3.0**\n\nLogin ရန် ဖုန်းနံပါတ်ပေးပါ:", kb);
+    return bot.sendMessage(chatId, "🤖 **BigWin AI Final Fix**\n\nLogin ရန် ဖုန်းနံပါတ်ပေးပါ:", kb);
   }
   if (text === "🚀 Run 30s") {
     if (!user_db[chatId]?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ");
-    user_db[chatId].running = true; user_db[chatId].typeId = 10; user_db[chatId].mode = "30s";
+    user_db[chatId].running = true; user_db[chatId].typeId = 30; user_db[chatId].mode = "30s";
     monitoringLoop(chatId);
     return bot.sendMessage(chatId, "⚡ 30s AI စတင်ပါပြီ", kb);
   }
@@ -116,7 +118,7 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
   }
   if (user_db[chatId] && !user_db[chatId].token) {
-    const res = await callApi("Login", { phonetype: -1, language: 0, logintype: "mobile", username: "95" + user_db[chatId].phone.replace(/^0/, ''), pwd: text });
+    const res = await callApi("Login", { phonetype: -1, language: 7, logintype: "mobile", username: "95" + user_db[chatId].phone.replace(/^0/, ''), pwd: text });
     if (res && res.msgCode === 0) {
       user_db[chatId].token = `${res.data.tokenHeader}${res.data.token}`;
       return bot.sendMessage(chatId, `✅ Login အောင်မြင်ပါသည်`, kb);
