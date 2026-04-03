@@ -35,12 +35,19 @@ async function callApi(endpoint, payload, authToken = null) {
   payload.timestamp = Math.floor(Date.now() / 1000);
   payload.random = "b05034ba4a2642009350ee863f29e2e9";
   payload.signature = signMd5(payload);
-  const headers = { "Content-Type": "application/json;charset=UTF-8" };
+  const headers = { 
+    "Content-Type": "application/json;charset=UTF-8",
+    "Accept": "application/json, text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+  };
   if (authToken) headers["Authorization"] = authToken;
   try {
-    const response = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 10000 });
+    const response = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 8000 });
     return response.data;
-  } catch (error) { return null; }
+  } catch (error) { 
+    console.log("API Error:", error.message);
+    return null; 
+  }
 }
 
 // --- AI Logic ---
@@ -71,12 +78,12 @@ function aiBrainConsensus(history) {
 }
 
 async function monitoringLoop(chatId) {
-  const data = user_db[chatId];
-  while (data && data.running) {
-    // typeId: 1 (1Min), typeId: 10 (30s)
+  while (user_db[chatId] && user_db[chatId].running) {
+    const data = user_db[chatId];
+    // 30s အတွက် typeId: 10 ကို ပိုပြီး တည်ငြိမ်အောင် ခေါ်ယူခြင်း
     const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: data.typeId }, data.token);
     
-    if (res && res.msgCode === 0) {
+    if (res && res.msgCode === 0 && res.data && res.data.list.length > 0) {
       const history = res.data.list;
       const currIssue = history[0].issueNumber;
 
@@ -92,22 +99,26 @@ async function monitoringLoop(chatId) {
         data.last_issue = currIssue;
 
         const nextIssue = (BigInt(currIssue) + 1n).toString();
-        const msg = `🔔 **AI Update [${data.gameMode}]**\n` +
-                    `🎯 Next Issue: \`${nextIssue.slice(-3)}\`\n` +
-                    `🧠 AI Decision: **${finalDecision}**\n` +
-                    `📈 Confidence: \`${confidence}%\`\n` +
-                    `📊 Pattern: \`${patternType}\``;
+        const msg = `🔔 **AI Update [Wingo ${data.gameMode}]**\n\n` +
+                    `🎯 Issue: \`${nextIssue.slice(-3)}\`\n` +
+                    `🧠 Decision: **${finalDecision}**\n` +
+                    `📊 Pattern: \`${patternType}\` (\`${confidence}%\`)`;
         
         bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
       }
+    } else if (res && res.msgCode === 401) {
+       // Token သက်တမ်းကုန်သွားရင် Login ပြန်တောင်းဖို့ message ပို့
+       user_db[chatId].running = false;
+       bot.sendMessage(chatId, "⚠️ Session သက်တမ်းကုန်သွားပါပြီ။ /start နှိပ်ပြီး Login ပြန်ဝင်ပေးပါဗျ။");
+       break;
     }
-    // 30s ဆိုရင် 5 စက္ကန့်တစ်ခါစစ်၊ 1Min ဆိုရင် 15 စက္ကန့်တစ်ခါစစ်
-    const waitTime = data.typeId === 10 ? 5000 : 15000;
+    
+    const waitTime = data.typeId === 10 ? 3000 : 10000;
     await new Promise(r => setTimeout(r, waitTime));
   }
 }
 
-// --- Bot Logic ---
+// --- Bot Command Handlers ---
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
@@ -126,7 +137,7 @@ bot.on('message', async (msg) => {
 
   if (text === '/start') {
     delete user_db[chatId];
-    return bot.sendMessage(chatId, "🤖 **AI Multi-Mode Pro**\n\nLogin ရန် ဖုန်းနံပါတ်ပေးပါ:", mainKeyboard);
+    return bot.sendMessage(chatId, "🤖 **AI Multi-Mode Pro**\n\nLogin ဝင်ရန် ဖုန်းနံပါတ်ပေးပါ:", mainKeyboard);
   }
 
   if (text === "🚀 Run 30s") {
@@ -134,8 +145,9 @@ bot.on('message', async (msg) => {
     user_db[chatId].running = true;
     user_db[chatId].typeId = 10;
     user_db[chatId].gameMode = "30s";
+    user_db[chatId].last_issue = ""; // Reset issue to start fresh
     monitoringLoop(chatId);
-    return bot.sendMessage(chatId, "⚡ **Wingo 30s AI စတင်ပါပြီ**", mainKeyboard);
+    return bot.sendMessage(chatId, "⚡ **Wingo 30s AI ကို စတင်နေပါပြီ...**\n(ခဏစောင့်ပေးပါ၊ အဖြေအသစ်တက်လာရင် ပို့ပေးပါမယ်)", mainKeyboard);
   }
 
   if (text === "🚀 Run 1Min") {
@@ -143,6 +155,7 @@ bot.on('message', async (msg) => {
     user_db[chatId].running = true;
     user_db[chatId].typeId = 1;
     user_db[chatId].gameMode = "1Min";
+    user_db[chatId].last_issue = "";
     monitoringLoop(chatId);
     return bot.sendMessage(chatId, "🕒 **Wingo 1Min AI စတင်ပါပြီ**", mainKeyboard);
   }
@@ -154,16 +167,18 @@ bot.on('message', async (msg) => {
 
   if (text === "📊 Results") {
     const data = user_db[chatId];
-    if (!data?.token) return bot.sendMessage(chatId, "Login ဝင်ပါ");
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, language: 0, typeId: data.typeId || 1 }, data.token);
+    if (!data?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ");
+    const tid = data.typeId || 1;
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, language: 0, typeId: tid }, data.token);
     if (res && res.msgCode === 0) {
-      let txt = `📊 **Results (${data.gameMode || "1Min"})**\n\n`;
+      let txt = `📊 **Results (${tid === 10 ? '30s' : '1Min'})**\n\n`;
       res.data.list.forEach(i => {
         let n = parseInt(i.number);
         txt += `▪️ ${i.issueNumber.slice(-3)} ➡️ ${n} (${n >= 5 ? 'B' : 'S'})\n`;
       });
       return bot.sendMessage(chatId, txt, { parse_mode: 'Markdown' });
     }
+    return bot.sendMessage(chatId, "❌ ဒေတာဆွဲမရပါ (Login ပြန်ဝင်ကြည့်ပါ)");
   }
 
   if (text === "🧠 History") {
@@ -181,9 +196,9 @@ bot.on('message', async (msg) => {
     const res = await callApi("Login", payload);
     if (res && res.msgCode === 0) {
       user_db[chatId].token = `${res.data.tokenHeader}${res.data.token}`;
-      return bot.sendMessage(chatId, `✅ **Login Success!**\nGame Mode ကိုရွေးပါ`, mainKeyboard);
+      return bot.sendMessage(chatId, `✅ **Login အောင်မြင်ပါသည်**\nအောက်က Mode တစ်ခုကို ရွေးပါ`, mainKeyboard);
     }
     delete user_db[chatId];
-    return bot.sendMessage(chatId, "❌ Password မှားသည်! /start ပြန်လုပ်ပါ");
+    return bot.sendMessage(chatId, "❌ Password မှားနေပါတယ်။ /start ကို နှိပ်ပြီး ဖုန်းနံပါတ်ကစ ပြန်လုပ်ပေးပါဗျ။");
   }
 });
