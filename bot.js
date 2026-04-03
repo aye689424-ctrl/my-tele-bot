@@ -3,6 +3,10 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
+const dns = require('dns');
+
+// Force IPv4 (fix getaddrinfo error)
+dns.setDefaultResultOrder('ipv4first');
 
 // Keep Alive
 const server = http.createServer((req, res) => { 
@@ -13,10 +17,11 @@ server.listen(process.env.PORT || 8080, () => {
     console.log(`✅ Server running on port ${process.env.PORT || 8080}`);
 });
 
-const token = '8678622589:AAFLYmXlETlYmmICqGE7F9bE-t-CYBvmPb0';
+// ✅ NEW TOKEN (အသစ်ရထားတဲ့ Token)
+const token = '8676836403:AAF-3RPr09Um45gDtI74YfnA05lsMnMnIQ8';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 
-// Bot options with better error handling
+// Bot options
 const botOptions = {
     polling: {
         interval: 300,
@@ -38,50 +43,37 @@ try {
 
 let user_db = {};
 
-// Error handlers for bot
+// Error handlers
 bot.on('polling_error', (err) => {
     console.error('Polling error:', err.code, err.message);
-    if (err.code === 'EFATAL' || err.message.includes('409')) {
-        console.log('Restarting bot polling...');
-        setTimeout(() => {
-            bot.stopPolling().then(() => {
-                bot.startPolling();
-            });
-        }, 5000);
-    }
 });
 
 bot.on('error', (err) => {
     console.error('Bot error:', err);
 });
 
-bot.on('webhook_error', (err) => {
-    console.error('Webhook error:', err);
-});
-
-// Test command to check if bot is alive
+// Test command
 bot.onText(/\/ping/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, '🏓 Pong! Bot is alive!');
     console.log(`Ping from ${chatId}`);
 });
 
-// Simple echo for testing
-bot.on('message', (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    console.log(`Received: "${text}" from ${chatId}`);
-    
-    // Respond to any message for testing
-    if (text === '/test123') {
-        bot.sendMessage(chatId, '✅ Bot is working!');
-    }
-});
-
+// Custom HTTPS Agent
 const agent = new https.Agent({
     rejectUnauthorized: false,
     keepAlive: true,
-    timeout: 60000
+    timeout: 60000,
+    lookup: (hostname, options, callback) => {
+        dns.lookup(hostname, { family: 4 }, (err, address, family) => {
+            if (err) {
+                console.error(`DNS lookup failed for ${hostname}:`, err.message);
+                return dns.lookup(hostname, callback);
+            }
+            console.log(`DNS resolved ${hostname} -> ${address}`);
+            callback(null, address, family);
+        });
+    }
 });
 
 function signMd5(data) {
@@ -346,18 +338,15 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
     
-    // Skip commands
     if (text.startsWith('/')) return;
     
     if (!user_db[chatId]) user_db[chatId] = {};
     
-    // Phone number (9-11 digits)
     if (/^\d{9,11}$/.test(text) && !user_db[chatId].token) {
         user_db[chatId].tempPhone = text;
         return bot.sendMessage(chatId, "🔐 Send your password:");
     }
     
-    // Password
     if (user_db[chatId].tempPhone && !user_db[chatId].token) {
         const phone = "95" + user_db[chatId].tempPhone.replace(/^0/, '');
         const loginRes = await callApi("Login", { 
@@ -370,7 +359,6 @@ bot.on('message', async (msg) => {
             delete user_db[chatId].tempPhone;
             bot.sendMessage(chatId, "✅ **LOGIN SUCCESS!**\nType /start30s to begin");
             
-            // Show balance
             const info = await getUserBalance(user_db[chatId].token);
             if (info?.msgCode === 0) {
                 bot.sendMessage(chatId, `💰 Balance: ${info.data.amount} MMK`);
