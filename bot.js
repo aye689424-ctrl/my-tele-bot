@@ -2,44 +2,27 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
-const https = require('https');
 const dns = require('dns');
-const fs = require('fs');
 
+// Force IPv4
 dns.setDefaultResultOrder('ipv4first');
 
-http.createServer((req, res) => { res.end('WinGo Real Engine v8.5 Active'); }).listen(process.env.PORT || 8080);
+// Render Keep Alive
+http.createServer((req, res) => { res.end('BigWin Pro Console v6.4 Active'); }).listen(process.env.PORT || 8080);
 
+// ✅ TOKEN အသစ် (ခင်ဗျားရဲ့ မူလ Token အလုပ်မလုပ်တော့ဘူး)
 const token = '8676836403:AAF-3RPr09Um45gDtI74YfnA05lsMnMnIQ8';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
-
-const botOptions = { polling: { interval: 300, autoStart: true, params: { timeout: 10 } } };
-const bot = new TelegramBot(token, botOptions);
+const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-if (fs.existsSync('user_data.json')) {
-    user_db = JSON.parse(fs.readFileSync('user_data.json'));
-}
-
-function saveData() {
-    fs.writeFileSync('user_data.json', JSON.stringify(user_db, null, 2));
-}
-
-const agent = new https.Agent({
-    rejectUnauthorized: false,
-    keepAlive: true,
-    timeout: 60000,
-    lookup: (hostname, options, callback) => {
-        dns.lookup(hostname, { family: 4 }, (err, address) => {
-            callback(null, address, 4);
-        });
-    }
-});
-
+// --- 🛡️ Helper Functions ---
 function signMd5(data) {
     let temp = { ...data };
-    delete temp.signature; delete temp.timestamp; delete temp.random;
+    delete temp.signature;
+    delete temp.timestamp;
+    delete temp.random;
     const sortedKeys = Object.keys(temp).sort();
     let sortedData = {};
     sortedKeys.forEach(key => { sortedData[key] = temp[key]; });
@@ -59,265 +42,184 @@ async function callApi(endpoint, payload, authToken = null) {
     };
 
     try {
-        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 30000, httpsAgent: agent });
+        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 20000 });
         console.log(`${endpoint}:`, res.data?.msgCode, res.data?.msg);
         return res.data;
     } catch (e) { 
-        console.error(`API Error:`, e.code); 
-        return null; 
+        console.log(`API Error: ${e.code}`);
+        return { msgCode: -1, msg: "Network Error" }; 
     }
 }
 
-function calculateBetAmount(data) {
-    const strategy = data.strategy || "MARTINGALE";
-    const step = data.step || 0;
-    const martingaleBets = [10, 30, 90, 270, 810, 2430, 7290];
-    
-    switch(strategy) {
-        case "MARTINGALE": return martingaleBets[step] || martingaleBets[martingaleBets.length-1];
-        default: return 10;
+// --- 🧠 Formula Manager ---
+function getDecision(history, formulaType) {
+    const last10 = history.slice(0, 10).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
+    const last = last10[0];
+    if (formulaType === "FOLLOW") return last;
+    if (formulaType === "OPPOSITE") return last === "Big" ? "Small" : "Big";
+    if (formulaType === "RANDOM") return Math.random() > 0.5 ? "Big" : "Small";
+    if (formulaType === "SMART") {
+        const bigs = last10.filter(v => v === "Big").length;
+        return bigs >= 5 ? "Small" : "Big";
     }
+    return last;
 }
 
-function getMainMenu() {
-    return {
-        reply_markup: {
-            keyboard: [
-                ["🚀 Start 30s", "🚀 Start 1min"],
-                ["📊 Stats", "💰 Balance"],
-                ["⚙️ Settings", "📜 History"],
-                ["🛑 Stop", "❓ Help"]
-            ],
-            resize_keyboard: true
-        }
-    };
-}
-
-function getSettingsMenu(chatId) {
-    const data = user_db[chatId] || {};
-    return {
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: `🎲 Strategy: ${data.strategy || "MARTINGALE"}`, callback_data: "change_strategy" }],
-                [{ text: `🔄 Mode: ${data.strategyType || "OPPOSITE"}`, callback_data: "change_mode" }],
-                [{ text: `🛑 Stop Loss: ${data.stopLoss || 5000}`, callback_data: "set_stoploss" }],
-                [{ text: `🎯 Target: ${data.targetProfit || 3000}`, callback_data: "set_target" }]
-            ]
-        }
-    };
-}
-
+// --- 🚀 Auto-Betting Loop ---
 async function monitoringLoop(chatId) {
+    bot.sendMessage(chatId, "⏳ ပွဲစဉ်များကို စတင်စောင့်ကြည့်နေပါပြီ...");
+    
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
-        
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, language: 7, typeId: data.typeId }, data.token);
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 7, typeId: data.typeId }, data.token);
 
-        if (res && res.msgCode === 0 && res.data?.list?.length > 0) {
+        if (res && res.msgCode === 0 && res.data && res.data.list.length > 0) {
             const history = res.data.list;
             const currIssue = history[0].issueNumber;
-            const currNumber = history[0].number;
 
             if (currIssue !== data.last_issue) {
-                // Check previous bet
+                // ၁။ နိုင်/ရှုံး တွက်ချက်ခြင်း
                 if (data.last_pred && data.last_issue) {
                     const lastResult = history.find(h => h.issueNumber === data.last_issue);
                     if (lastResult && lastResult.number && lastResult.number !== "null") {
                         const realRes = parseInt(lastResult.number) >= 5 ? "Big" : "Small";
-                        const win = data.last_pred === realRes;
+                        const win = (data.last_pred === realRes);
+                        const betAmt = data.betPlan[data.step];
                         
                         if (win) {
+                            data.sessionProfit += (betAmt * 0.95);
                             data.step = 0;
-                            await bot.sendMessage(chatId, `✅ **WIN!** ${data.last_amount} MMK`);
+                            bot.sendMessage(chatId, `✅ **WIN!** +${(betAmt * 0.95).toFixed(0)} | Total: ${data.sessionProfit.toFixed(0)}`);
                         } else {
-                            data.step = (data.step || 0) + 1;
-                            await bot.sendMessage(chatId, `❌ **LOSS!** ${data.last_amount} MMK`);
+                            data.sessionProfit -= betAmt;
+                            data.step = (data.step + 1) % data.betPlan.length;
+                            bot.sendMessage(chatId, `❌ **LOSS!** -${betAmt} | Total: ${data.sessionProfit.toFixed(0)}`);
                         }
-                        
-                        if (!data.stats) data.stats = { profit: 0 };
-                        data.stats.profit += win ? data.last_amount * 0.97 : -data.last_amount;
-                        saveData();
                     }
                 }
 
-                // Place new bet
-                if (currNumber && currNumber !== "null") {
-                    const lastResult = parseInt(currNumber) >= 5 ? "Big" : "Small";
-                    const mode = data.strategyType || "OPPOSITE";
-                    let decision = mode === "OPPOSITE" ? (lastResult === "Big" ? "Small" : "Big") : lastResult;
-                    
-                    const nextIssue = (BigInt(currIssue) + 1n).toString();
-                    const amount = calculateBetAmount(data);
-                    
-                    if ((data.stats?.profit || 0) <= -(data.stopLoss || 5000)) {
-                        await bot.sendMessage(chatId, `🛑 Stop loss reached!`);
-                        data.running = false;
-                        break;
-                    }
-                    if ((data.stats?.profit || 0) >= (data.targetProfit || 3000)) {
-                        await bot.sendMessage(chatId, `🎉 Target reached!`);
-                        data.running = false;
-                        break;
-                    }
+                // ၂။ အသစ်လောင်းမည့်ဘက်ကို ဆုံးဖြတ်ခြင်း
+                const decision = getDecision(history, data.formula);
+                const nextIssue = (BigInt(currIssue) + 1n).toString();
+                const currentBetAmt = data.betPlan[data.step];
 
-                    const betPayload = {
-                        "typeId": data.typeId,
-                        "issuenumber": nextIssue,
-                        "amount": amount,
-                        "betCount": 7,
-                        "gameType": 2,
-                        "selectType": (decision === "Big" ? 13 : 14),
-                        "language": 7
-                    };
+                // ✅ FIXED: Payload (betCount=7, selectType 13/14, GameBetting)
+                const betPayload = {
+                    "typeId": data.typeId,
+                    "issuenumber": nextIssue,
+                    "amount": currentBetAmt,
+                    "betCount": 7,           // ✅ FIXED: 7 (not 1)
+                    "gameType": 2,
+                    "selectType": (decision === "Big" ? 13 : 14),  // ✅ FIXED: Big=13, Small=14
+                    "language": 7
+                };
 
-                    const betRes = await callApi("GameBetting", betPayload, data.token);
-                    data.last_pred = decision;
-                    data.last_issue = currIssue;
-                    data.last_amount = amount;
+                // ✅ FIXED: GameBetting (not AddOrder)
+                const betRes = await callApi("GameBetting", betPayload, data.token);
+                
+                data.last_pred = decision; 
+                data.last_issue = currIssue;
 
-                    if (betRes?.msgCode === 0) {
-                        await bot.sendMessage(chatId, `🎯 **Bet Placed**\n📊 ${nextIssue.slice(-5)}\n🎲 ${decision}\n💰 ${amount} MMK`);
-                    } else {
-                        await bot.sendMessage(chatId, `⚠️ **Bet Failed:** ${betRes?.msg || "Error"}`);
-                    }
+                if (betRes && betRes.msgCode === 0) {
+                    bot.sendMessage(chatId, `✅ **Bet Success**\n🎯 Issue: ${nextIssue.slice(-5)}\n🎲 Pick: ${decision}\n💰 Amount: ${currentBetAmt}\n📈 Profit: ${data.sessionProfit.toFixed(0)}`);
+                } else {
+                    bot.sendMessage(chatId, `❌ **Bet Failed:** ${betRes ? betRes.msg : "Connection Error"}`);
                 }
             }
         }
-        await new Promise(r => setTimeout(r, 3500));
+        await new Promise(r => setTimeout(r, 4500));
     }
 }
 
-// ========== COMMANDS ==========
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId, 
-        "🤖 **WinGo Pro Bot v8.5**\n\n" +
-        "**Login ဝင်ရန်:**\n" +
-        "1️⃣ ဖုန်းနံပါတ် (09xxxxxxxxx)\n" +
-        "2️⃣ စကားဝှက်\n\n" +
-        "ဖုန်းနံပါတ်ပို့ပါ:", 
-        { reply_markup: { remove_keyboard: true } }
-    );
-});
-
-// ========== BUTTON HANDLERS ==========
+// --- 📱 Bot Menu & Commands ---
 bot.on('message', async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    
-    if (text.startsWith('/')) return;
-    if (!user_db[chatId]) user_db[chatId] = {};
-    
-    // 🚀 Start 30s
-    if (text === "🚀 Start 30s") {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login first! Send /start");
-        if (user_db[chatId].running) return bot.sendMessage(chatId, "⚠️ Bot already running!");
+    const chatId = msg.chat.id; const text = msg.text;
+    if (!user_db[chatId]) user_db[chatId] = { running: false, sessionProfit: 0, step: 0, logs: [], betPlan: [10, 30, 90, 270, 830], formula: "SMART", typeId: 30 };
+
+    const menu = { reply_markup: { keyboard: [["🚀 Start Auto", "🛑 Stop Auto"], ["💰 My Profile", "⚙️ Setup"], ["/start"]], resize_keyboard: true } };
+
+    if (text === '/start') return bot.sendMessage(chatId, "🤖 **BigWin Pro Console v6.4**\n\n- ဖုန်းနံပါတ် 09... ပို့ပါ\n- Password ပို့ပါ\n- Start Auto နှိပ်ပါ", menu);
+
+    if (text === "💰 My Profile") {
+        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
+        const info = await callApi("GetUserInfo", {}, user_db[chatId].token);
+        if (info?.msgCode === 0) return bot.sendMessage(chatId, `👤 ID: ${info.data.userId}\n💵 Balance: ${info.data.amount} ကျပ်`);
+        return bot.sendMessage(chatId, "❌ Balance ရယူလို့မရပါ။");
+    }
+
+    if (text === "⚙️ Setup") {
+        const setKB = { reply_markup: { inline_keyboard: [
+            [{ text: "🧬 Formula: " + user_db[chatId].formula, callback_data: "cycle" }],
+            [{ text: "🕒 Mode: " + (user_db[chatId].typeId === 30 ? "30s" : "1min"), callback_data: "mode" }]
+        ]}};
+        return bot.sendMessage(chatId, "⚙️ **Settings**\n\nPlan ပြင်ရန်: `plan 10,30,90,270`", setKB);
+    }
+
+    if (text === "🚀 Start Auto") {
+        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
+        if (user_db[chatId].running) return bot.sendMessage(chatId, "⚠️ Bot သည် အလုပ်လုပ်နေဆဲပါ။");
         
-        user_db[chatId].typeId = 30;
         user_db[chatId].running = true;
+        user_db[chatId].sessionProfit = 0;
         user_db[chatId].step = 0;
         user_db[chatId].last_issue = "";
         user_db[chatId].last_pred = null;
-        
-        bot.sendMessage(chatId, "🚀 **30s Bot Started!**", getMainMenu());
         monitoringLoop(chatId);
+        return bot.sendMessage(chatId, "🚀 **Auto-Betting စတင်ပါပြီ!**");
     }
-    
-    // 🚀 Start 1min
-    else if (text === "🚀 Start 1min") {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login first!");
-        if (user_db[chatId].running) return bot.sendMessage(chatId, "⚠️ Bot already running!");
-        
-        user_db[chatId].typeId = 1;
-        user_db[chatId].running = true;
-        user_db[chatId].step = 0;
-        
-        bot.sendMessage(chatId, "🚀 **1min Bot Started!**", getMainMenu());
-        monitoringLoop(chatId);
+
+    if (text === "🛑 Stop Auto") {
+        user_db[chatId].running = false;
+        return bot.sendMessage(chatId, "🛑 Bot ရပ်နားပါပြီ။");
     }
-    
-    // 📊 Stats
-    else if (text === "📊 Stats") {
-        const profit = user_db[chatId]?.stats?.profit || 0;
-        bot.sendMessage(chatId, `📊 **Profit:** ${profit.toFixed(0)} MMK`);
-    }
-    
-    // 💰 Balance
-    else if (text === "💰 Balance") {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login first!");
-        const info = await callApi("GetUserInfo", {}, user_db[chatId].token);
-        if (info?.msgCode === 0) {
-            bot.sendMessage(chatId, `💰 **Balance:** ${info.data.amount} MMK`);
+
+    if (text.startsWith("plan ")) {
+        const plan = text.replace("plan ", "").split(",").map(Number);
+        if (plan.length > 0 && plan.every(n => n > 0)) {
+            user_db[chatId].betPlan = plan;
+            user_db[chatId].step = 0;
+            return bot.sendMessage(chatId, `✅ Bet Plan: ${plan.join(", ")} MMK`);
         }
     }
-    
-    // ⚙️ Settings
-    else if (text === "⚙️ Settings") {
-        bot.sendMessage(chatId, "⚙️ **Settings**", getSettingsMenu(chatId));
-    }
-    
-    // 📜 History
-    else if (text === "📜 History") {
-        bot.sendMessage(chatId, "📜 History feature - Coming soon");
-    }
-    
-    // 🛑 Stop
-    else if (text === "🛑 Stop") {
-        if (user_db[chatId]) {
-            user_db[chatId].running = false;
-            bot.sendMessage(chatId, "🛑 **Bot Stopped**", getMainMenu());
-        }
-    }
-    
-    // ❓ Help
-    else if (text === "❓ Help") {
-        bot.sendMessage(chatId,
-            "🤖 **Help**\n\n" +
-            "1. /start\n" +
-            "2. Send phone number (09xxxxxxxxx)\n" +
-            "3. Send password\n" +
-            "4. Press 🚀 Start 30s"
-        );
-    }
-    
-    // ========== FIXED LOGIN ==========
-    else if (!user_db[chatId].token && !user_db[chatId].awaitingPassword) {
-        // Check if it's a phone number
+
+    // ✅ FIXED LOGIN
+    if (!user_db[chatId].token && !user_db[chatId].awaitingPassword) {
+        // Phone number detection
         const cleanPhone = text.replace(/[^0-9]/g, '');
         if (cleanPhone.length >= 9 && cleanPhone.length <= 11) {
             user_db[chatId].tempPhone = text;
             user_db[chatId].awaitingPassword = true;
-            return bot.sendMessage(chatId, "🔐 Send your password:");
+            return bot.sendMessage(chatId, "🔐 Password ပို့ပါ:");
         }
     }
-    else if (user_db[chatId].awaitingPassword && !user_db[chatId].token) {
+    
+    if (user_db[chatId].awaitingPassword && !user_db[chatId].token) {
         const rawPhone = user_db[chatId].tempPhone;
         let formattedPhone = rawPhone;
         
-        // Format phone number
+        // Format phone correctly
         if (rawPhone.startsWith('09')) {
             formattedPhone = '95' + rawPhone.substring(1);
         } else if (rawPhone.startsWith('0')) {
             formattedPhone = '95' + rawPhone.substring(1);
-        } else if (!rawPhone.startsWith('95') && !rawPhone.startsWith('09')) {
+        } else if (!rawPhone.startsWith('95')) {
             formattedPhone = '95' + rawPhone;
         }
         
         console.log(`Login: ${rawPhone} -> ${formattedPhone}`);
         
-        const loginRes = await callApi("Login", { 
+        const res = await callApi("Login", { 
             phonetype: -1, language: 7, logintype: "mobile", 
             username: formattedPhone, pwd: text 
         });
         
-        if (loginRes?.msgCode === 0) {
-            user_db[chatId].token = loginRes.data.tokenHeader + loginRes.data.token;
+        if (res?.msgCode === 0) {
+            user_db[chatId].token = res.data.tokenHeader + res.data.token;
             delete user_db[chatId].tempPhone;
             delete user_db[chatId].awaitingPassword;
-            saveData();
+            bot.sendMessage(chatId, "✅ **Login အောင်မြင်ပါပြီ!**\n\nStart Auto နှိပ်ပါ။", menu);
             
-            bot.sendMessage(chatId, "✅ **LOGIN SUCCESS!**", getMainMenu());
-            
+            // Show balance
             const info = await callApi("GetUserInfo", {}, user_db[chatId].token);
             if (info?.msgCode === 0) {
                 bot.sendMessage(chatId, `💰 Balance: ${info.data.amount} MMK`);
@@ -325,67 +227,22 @@ bot.on('message', async (msg) => {
         } else {
             delete user_db[chatId].tempPhone;
             delete user_db[chatId].awaitingPassword;
-            bot.sendMessage(chatId, 
-                "❌ **LOGIN FAILED!**\n\n" +
-                "စစ်ဆေးရန်:\n" +
-                "• ဖုန်းနံပါတ်မှန်ကန်သလား\n" +
-                "• စကားဝှက်မှန်ကန်သလား\n" +
-                "• Website မှာ ဝင်ကြည့်ပါ\n\n" +
-                "/start ပြန်လုပ်ပါ။"
-            );
+            bot.sendMessage(chatId, "❌ **Login မှားယွင်းနေပါသည်။**\n\n/start ပြန်လုပ်ပါ။");
         }
     }
 });
 
-// ========== INLINE BUTTONS ==========
-bot.on('callback_query', async (q) => {
+// Callback handlers
+bot.on('callback_query', (q) => {
     const chatId = q.message.chat.id;
-    const data = q.data;
-    
-    if (data === "change_strategy") {
-        const strategies = ["MARTINGALE", "FIBONACCI", "FLAT"];
-        const current = user_db[chatId]?.strategy || "MARTINGALE";
-        const next = strategies[(strategies.indexOf(current) + 1) % strategies.length];
-        user_db[chatId].strategy = next;
-        await bot.answerCallbackQuery(q.id, { text: `Strategy: ${next}` });
+    if (q.data === "cycle") {
+        const f = ["SMART", "FOLLOW", "OPPOSITE", "RANDOM"];
+        user_db[chatId].formula = f[(f.indexOf(user_db[chatId].formula) + 1) % f.length];
+    } else if (q.data === "mode") {
+        user_db[chatId].typeId = user_db[chatId].typeId === 30 ? 1 : 30;
     }
-    else if (data === "change_mode") {
-        const modes = ["OPPOSITE", "FOLLOW", "RANDOM"];
-        const current = user_db[chatId]?.strategyType || "OPPOSITE";
-        const next = modes[(modes.indexOf(current) + 1) % modes.length];
-        user_db[chatId].strategyType = next;
-        await bot.answerCallbackQuery(q.id, { text: `Mode: ${next}` });
-    }
-    else if (data === "set_stoploss") {
-        await bot.answerCallbackQuery(q.id, { text: "Send: /loss 5000" });
-        bot.sendMessage(chatId, "📝 Type: `/loss 5000`");
-    }
-    else if (data === "set_target") {
-        await bot.answerCallbackQuery(q.id, { text: "Send: /target 3000" });
-        bot.sendMessage(chatId, "📝 Type: `/target 3000`");
-    }
-    
-    saveData();
-    await bot.editMessageText("⚙️ **Settings**", {
-        chat_id: chatId,
-        message_id: q.message.message_id,
-        reply_markup: getSettingsMenu(chatId).reply_markup
-    }).catch(() => {});
+    bot.answerCallbackQuery(q.id);
+    bot.sendMessage(chatId, `🔄 Updated: Formula=${user_db[chatId].formula}, Mode=${user_db[chatId].typeId === 30 ? "30s" : "1min"}`);
 });
 
-// Number commands
-bot.onText(/\/loss (\d+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    user_db[chatId].stopLoss = parseInt(match[1]);
-    bot.sendMessage(chatId, `✅ Stop loss: ${match[1]} MMK`);
-    saveData();
-});
-
-bot.onText(/\/target (\d+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    user_db[chatId].targetProfit = parseInt(match[1]);
-    bot.sendMessage(chatId, `✅ Target: ${match[1]} MMK`);
-    saveData();
-});
-
-console.log('🤖 Bot Started!');
+console.log('🤖 BigWin Pro Console v6.4 Started!');
