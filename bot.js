@@ -43,12 +43,11 @@ async function callApi(endpoint, payload, authToken = null) {
   } catch (error) { return null; }
 }
 
-// --- အဆင့်မြှင့်ထားသော AI Logic အသစ် ---
+// --- AI Logic ---
 function aiBrainConsensus(history) {
   const results = history.slice(0, 10).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
   const lastVal = results[0];
-  
-  let patternType = "NORMAL (ပုံမှန်)";
+  let patternType = "NORMAL";
   let finalDecision = "";
   let confidence = 0;
 
@@ -56,11 +55,11 @@ function aiBrainConsensus(history) {
   const isChoppy = results[0] !== results[1] && results[1] !== results[2] && results[2] !== results[3];
 
   if (isStreak) {
-    patternType = "🔥 STREAK (တန်းထွက်နေသည်)";
+    patternType = "🔥 STREAK";
     finalDecision = lastVal; 
     confidence = 85;
   } else if (isChoppy) {
-    patternType = "🔄 CHOPPY (ပြန်ပြောင်းနေသည်)";
+    patternType = "🔄 CHOPPY";
     finalDecision = lastVal === "Big" ? "Small" : "Big";
     confidence = 75;
   } else {
@@ -68,14 +67,14 @@ function aiBrainConsensus(history) {
     finalDecision = bigCount >= 5 ? "Small" : "Big";
     confidence = 60;
   }
-
   return { finalDecision, confidence, patternType };
 }
 
 async function monitoringLoop(chatId) {
-  while (user_db[chatId] && user_db[chatId].running) {
-    const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: 1 }, data.token);
+  const data = user_db[chatId];
+  while (data && data.running) {
+    // typeId: 1 (1Min), typeId: 10 (30s)
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: data.typeId }, data.token);
     
     if (res && res.msgCode === 0) {
       const history = res.data.list;
@@ -85,7 +84,7 @@ async function monitoringLoop(chatId) {
         if (data.last_pred) {
           const realRes = parseInt(history[0].number) >= 5 ? "Big" : "Small";
           const isWin = data.last_pred === realRes ? "✅ WIN" : "❌ LOSS";
-          data.predictions.push(`🔹 Issue: ${currIssue.slice(-3)} | P: ${data.last_pred} | R: ${realRes} | ${isWin}`);
+          data.predictions.push(`🔹 [${data.gameMode}] ${currIssue.slice(-3)} | P: ${data.last_pred} | R: ${realRes} | ${isWin}`);
         }
 
         const { finalDecision, confidence, patternType } = aiBrainConsensus(history);
@@ -93,60 +92,83 @@ async function monitoringLoop(chatId) {
         data.last_issue = currIssue;
 
         const nextIssue = (BigInt(currIssue) + 1n).toString();
-        const msg = `🔔 **AI Update - Issue: ${nextIssue.slice(-3)}**\n\n` +
+        const msg = `🔔 **AI Update [${data.gameMode}]**\n` +
+                    `🎯 Next Issue: \`${nextIssue.slice(-3)}\`\n` +
                     `🧠 AI Decision: **${finalDecision}**\n` +
                     `📈 Confidence: \`${confidence}%\`\n` +
-                    `📊 Pattern: \`${patternType}\`\n\n` +
-                    `💡 *စနစ်က အခြေအနေအရ ပြောင်းလဲတွက်ချက်ပေးသည်*`;
+                    `📊 Pattern: \`${patternType}\``;
         
         bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
       }
     }
-    await new Promise(r => setTimeout(r, 15000));
+    // 30s ဆိုရင် 5 စက္ကန့်တစ်ခါစစ်၊ 1Min ဆိုရင် 15 စက္ကန့်တစ်ခါစစ်
+    const waitTime = data.typeId === 10 ? 5000 : 15000;
+    await new Promise(r => setTimeout(r, waitTime));
   }
 }
 
-// --- Telegram Commands ---
+// --- Bot Logic ---
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
   if (!text) return;
 
+  const mainKeyboard = {
+    reply_markup: {
+      keyboard: [
+        ["🚀 Run 30s", "🚀 Run 1Min"],
+        ["📊 Results", "🧠 History"],
+        ["🛑 Stop AI", "/start"]
+      ],
+      resize_keyboard: true
+    }
+  };
+
   if (text === '/start') {
     delete user_db[chatId];
-    return bot.sendMessage(chatId, "🤖 **BigWin AI Pro (Pattern Detector)**\n\nLogin ဝင်ရန် ဖုန်းနံပါတ်ပေးပါ (09xxx):");
+    return bot.sendMessage(chatId, "🤖 **AI Multi-Mode Pro**\n\nLogin ရန် ဖုန်းနံပါတ်ပေးပါ:", mainKeyboard);
   }
 
-  if (text === "📊 Results History") {
-    const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: 1 }, data?.token);
-    if (res && res.msgCode === 0) {
-      let txt = "📊 **Game Results (Last 15)**\n\n";
-      res.data.list.forEach(i => {
-        let n = parseInt(i.number);
-        txt += `▪️ ${i.issueNumber.slice(-3)} ➡️ ${n} (${n >= 5 ? 'Big' : 'Small'})\n`;
-      });
-      return bot.sendMessage(chatId, txt, { parse_mode: 'Markdown' });
-    }
-    return bot.sendMessage(chatId, "❌ အချက်အလက်ယူမရပါ။");
-  }
-
-  if (text === "🧠 Prediction History") {
-    const logs = user_db[chatId]?.predictions || [];
-    if (logs.length === 0) return bot.sendMessage(chatId, "မှတ်တမ်းမရှိသေးပါ။");
-    return bot.sendMessage(chatId, "🧠 **AI Log (Last 15)**\n\n" + logs.slice(-15).join("\n"));
-  }
-
-  if (text === "🚀 Start AI") {
-    if (!user_db[chatId]?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ။");
+  if (text === "🚀 Run 30s") {
+    if (!user_db[chatId]?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ!");
     user_db[chatId].running = true;
+    user_db[chatId].typeId = 10;
+    user_db[chatId].gameMode = "30s";
     monitoringLoop(chatId);
-    return bot.sendMessage(chatId, "🚀 **AI Pattern Monitoring စတင်ပါပြီ**");
+    return bot.sendMessage(chatId, "⚡ **Wingo 30s AI စတင်ပါပြီ**", mainKeyboard);
+  }
+
+  if (text === "🚀 Run 1Min") {
+    if (!user_db[chatId]?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ!");
+    user_db[chatId].running = true;
+    user_db[chatId].typeId = 1;
+    user_db[chatId].gameMode = "1Min";
+    monitoringLoop(chatId);
+    return bot.sendMessage(chatId, "🕒 **Wingo 1Min AI စတင်ပါပြီ**", mainKeyboard);
   }
 
   if (text === "🛑 Stop AI") {
     if (user_db[chatId]) user_db[chatId].running = false;
-    return bot.sendMessage(chatId, "🛑 AI Monitoring ရပ်တန့်လိုက်ပါပြီ။");
+    return bot.sendMessage(chatId, "🛑 AI ရပ်တန့်လိုက်ပါပြီ။", mainKeyboard);
+  }
+
+  if (text === "📊 Results") {
+    const data = user_db[chatId];
+    if (!data?.token) return bot.sendMessage(chatId, "Login ဝင်ပါ");
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, language: 0, typeId: data.typeId || 1 }, data.token);
+    if (res && res.msgCode === 0) {
+      let txt = `📊 **Results (${data.gameMode || "1Min"})**\n\n`;
+      res.data.list.forEach(i => {
+        let n = parseInt(i.number);
+        txt += `▪️ ${i.issueNumber.slice(-3)} ➡️ ${n} (${n >= 5 ? 'B' : 'S'})\n`;
+      });
+      return bot.sendMessage(chatId, txt, { parse_mode: 'Markdown' });
+    }
+  }
+
+  if (text === "🧠 History") {
+    const logs = user_db[chatId]?.predictions || [];
+    return bot.sendMessage(chatId, "🧠 **AI History**\n\n" + (logs.slice(-15).join("\n") || "မှတ်တမ်းမရှိသေးပါ"));
   }
 
   if (/^\d{9,11}$/.test(text) && !user_db[chatId]) {
@@ -159,10 +181,9 @@ bot.on('message', async (msg) => {
     const res = await callApi("Login", payload);
     if (res && res.msgCode === 0) {
       user_db[chatId].token = `${res.data.tokenHeader}${res.data.token}`;
-      const opts = { reply_markup: { keyboard: [["🚀 Start AI", "🛑 Stop AI"], ["📊 Results History", "🧠 Prediction History"]], resize_keyboard: true } };
-      return bot.sendMessage(chatId, `✅ **Login အောင်မြင်ပါသည်**`, opts);
+      return bot.sendMessage(chatId, `✅ **Login Success!**\nGame Mode ကိုရွေးပါ`, mainKeyboard);
     }
     delete user_db[chatId];
-    return bot.sendMessage(chatId, "❌ Password မှားယွင်းပါသည်။ /start ပြန်လုပ်ပါ။");
+    return bot.sendMessage(chatId, "❌ Password မှားသည်! /start ပြန်လုပ်ပါ");
   }
 });
