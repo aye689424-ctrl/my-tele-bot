@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bigwin-bot
+    runtime: node
+    buildCommand: npm install
+    startCommand: node bot.js
+    envVars:
+      - key: NODE_VERSION
+        value: 18.17.0
+      - key: NODE_OPTIONS
+        value: --dns-result-order=ipv4first
