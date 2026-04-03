@@ -50,7 +50,7 @@ async function callApi(endpoint, payload, authToken = null) {
 
 // --- AI Brains Strategy ---
 function aiBrainConsensus(history) {
-  const results = history.slice(0, 10).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
+  const results = history.slice(0, 30).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
   const lastVal = results[0];
   let votes = { Big: 0, Small: 0 };
   votes[lastVal === "Big" ? "Small" : "Big"] += 1;
