@@ -4,20 +4,17 @@ const crypto = require('crypto');
 const http = require('http');
 const dns = require('dns');
 
-// Force IPv4
 dns.setDefaultResultOrder('ipv4first');
 
-// Render Keep Alive
-http.createServer((req, res) => { res.end('BigWin Pro Console v6.4 Active'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('BigWin Pro Console v6.5 Active'); }).listen(process.env.PORT || 8080);
 
-// ✅ TOKEN အသစ် (ခင်ဗျားရဲ့ မူလ Token အလုပ်မလုပ်တော့ဘူး)
+// ✅ NEW TOKEN
 const token = '8676836403:AAF-3RPr09Um45gDtI74YfnA05lsMnMnIQ8';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// --- 🛡️ Helper Functions ---
 function signMd5(data) {
     let temp = { ...data };
     delete temp.signature;
@@ -46,12 +43,11 @@ async function callApi(endpoint, payload, authToken = null) {
         console.log(`${endpoint}:`, res.data?.msgCode, res.data?.msg);
         return res.data;
     } catch (e) { 
-        console.log(`API Error: ${e.code}`);
+        console.log(`API Error:`, e.code);
         return { msgCode: -1, msg: "Network Error" }; 
     }
 }
 
-// --- 🧠 Formula Manager ---
 function getDecision(history, formulaType) {
     const last10 = history.slice(0, 10).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
     const last = last10[0];
@@ -65,10 +61,7 @@ function getDecision(history, formulaType) {
     return last;
 }
 
-// --- 🚀 Auto-Betting Loop ---
 async function monitoringLoop(chatId) {
-    bot.sendMessage(chatId, "⏳ ပွဲစဉ်များကို စတင်စောင့်ကြည့်နေပါပြီ...");
-    
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
         const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 7, typeId: data.typeId }, data.token);
@@ -78,7 +71,6 @@ async function monitoringLoop(chatId) {
             const currIssue = history[0].issueNumber;
 
             if (currIssue !== data.last_issue) {
-                // ၁။ နိုင်/ရှုံး တွက်ချက်ခြင်း
                 if (data.last_pred && data.last_issue) {
                     const lastResult = history.find(h => h.issueNumber === data.last_issue);
                     if (lastResult && lastResult.number && lastResult.number !== "null") {
@@ -98,23 +90,20 @@ async function monitoringLoop(chatId) {
                     }
                 }
 
-                // ၂။ အသစ်လောင်းမည့်ဘက်ကို ဆုံးဖြတ်ခြင်း
                 const decision = getDecision(history, data.formula);
                 const nextIssue = (BigInt(currIssue) + 1n).toString();
                 const currentBetAmt = data.betPlan[data.step];
 
-                // ✅ FIXED: Payload (betCount=7, selectType 13/14, GameBetting)
                 const betPayload = {
                     "typeId": data.typeId,
                     "issuenumber": nextIssue,
                     "amount": currentBetAmt,
-                    "betCount": 7,           // ✅ FIXED: 7 (not 1)
+                    "betCount": 7,
                     "gameType": 2,
-                    "selectType": (decision === "Big" ? 13 : 14),  // ✅ FIXED: Big=13, Small=14
+                    "selectType": (decision === "Big" ? 13 : 14),
                     "language": 7
                 };
 
-                // ✅ FIXED: GameBetting (not AddOrder)
                 const betRes = await callApi("GameBetting", betPayload, data.token);
                 
                 data.last_pred = decision; 
@@ -131,27 +120,59 @@ async function monitoringLoop(chatId) {
     }
 }
 
-// --- 📱 Bot Menu & Commands ---
+// ========== MAIN BOT ==========
 bot.on('message', async (msg) => {
-    const chatId = msg.chat.id; const text = msg.text;
-    if (!user_db[chatId]) user_db[chatId] = { running: false, sessionProfit: 0, step: 0, logs: [], betPlan: [10, 30, 90, 270, 830], formula: "SMART", typeId: 30 };
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    
+    if (!user_db[chatId]) {
+        user_db[chatId] = { 
+            running: false, 
+            sessionProfit: 0, 
+            step: 0, 
+            betPlan: [10, 30, 90, 270, 830], 
+            formula: "SMART", 
+            typeId: 30 
+        };
+    }
 
-    const menu = { reply_markup: { keyboard: [["🚀 Start Auto", "🛑 Stop Auto"], ["💰 My Profile", "⚙️ Setup"], ["/start"]], resize_keyboard: true } };
+    const menu = { 
+        reply_markup: { 
+            keyboard: [["🚀 Start Auto", "🛑 Stop Auto"], ["💰 My Profile", "⚙️ Setup"], ["/start"]], 
+            resize_keyboard: true 
+        } 
+    };
 
-    if (text === '/start') return bot.sendMessage(chatId, "🤖 **BigWin Pro Console v6.4**\n\n- ဖုန်းနံပါတ် 09... ပို့ပါ\n- Password ပို့ပါ\n- Start Auto နှိပ်ပါ", menu);
+    if (text === '/start') {
+        return bot.sendMessage(chatId, 
+            "🤖 **BigWin Pro Console v6.5**\n\n" +
+            "**Login ဝင်ရန်:**\n" +
+            "1️⃣ ဖုန်းနံပါတ် (95xxxxxxxxx ပုံစံ)\n" +
+            "2️⃣ စကားဝှက်\n\n" +
+            "ဥပမာ: `959771234567`\n\n" +
+            "ဖုန်းနံပါတ်ပို့ပါ:", 
+            { reply_markup: { remove_keyboard: true } }
+        );
+    }
 
     if (text === "💰 My Profile") {
         if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
         const info = await callApi("GetUserInfo", {}, user_db[chatId].token);
-        if (info?.msgCode === 0) return bot.sendMessage(chatId, `👤 ID: ${info.data.userId}\n💵 Balance: ${info.data.amount} ကျပ်`);
+        if (info?.msgCode === 0) {
+            return bot.sendMessage(chatId, `👤 ID: ${info.data.userId}\n💵 Balance: ${info.data.amount} ကျပ်`);
+        }
         return bot.sendMessage(chatId, "❌ Balance ရယူလို့မရပါ။");
     }
 
     if (text === "⚙️ Setup") {
-        const setKB = { reply_markup: { inline_keyboard: [
-            [{ text: "🧬 Formula: " + user_db[chatId].formula, callback_data: "cycle" }],
-            [{ text: "🕒 Mode: " + (user_db[chatId].typeId === 30 ? "30s" : "1min"), callback_data: "mode" }]
-        ]}};
+        const setKB = { 
+            reply_markup: { 
+                inline_keyboard: [
+                    [{ text: "🧬 Formula: " + user_db[chatId].formula, callback_data: "cycle" }],
+                    [{ text: "🕒 Mode: " + (user_db[chatId].typeId === 30 ? "30s" : "1min"), callback_data: "mode" }]
+                ]
+            }
+        };
         return bot.sendMessage(chatId, "⚙️ **Settings**\n\nPlan ပြင်ရန်: `plan 10,30,90,270`", setKB);
     }
 
@@ -165,12 +186,12 @@ bot.on('message', async (msg) => {
         user_db[chatId].last_issue = "";
         user_db[chatId].last_pred = null;
         monitoringLoop(chatId);
-        return bot.sendMessage(chatId, "🚀 **Auto-Betting စတင်ပါပြီ!**");
+        return bot.sendMessage(chatId, "🚀 **Auto-Betting စတင်ပါပြီ!**", menu);
     }
 
     if (text === "🛑 Stop Auto") {
         user_db[chatId].running = false;
-        return bot.sendMessage(chatId, "🛑 Bot ရပ်နားပါပြီ။");
+        return bot.sendMessage(chatId, "🛑 Bot ရပ်နားပါပြီ။", menu);
     }
 
     if (text.startsWith("plan ")) {
@@ -182,52 +203,91 @@ bot.on('message', async (msg) => {
         }
     }
 
-    // ✅ FIXED LOGIN
+    // ========== FIXED LOGIN FOR +95 FORMAT ==========
+    
+    // Step 1: Get phone number (ဖုန်းနံပါတ်လက်ခံမယ်)
     if (!user_db[chatId].token && !user_db[chatId].awaitingPassword) {
-        // Phone number detection
-        const cleanPhone = text.replace(/[^0-9]/g, '');
-        if (cleanPhone.length >= 9 && cleanPhone.length <= 11) {
-            user_db[chatId].tempPhone = text;
+        // Remove + sign and non-digits
+        let cleanPhone = text.replace(/[^0-9]/g, '');
+        
+        // Check if it's a valid phone (9-12 digits)
+        if (cleanPhone.length >= 9 && cleanPhone.length <= 12) {
+            user_db[chatId].tempPhone = cleanPhone;
             user_db[chatId].awaitingPassword = true;
-            return bot.sendMessage(chatId, "🔐 Password ပို့ပါ:");
+            return bot.sendMessage(chatId, "🔐 **စကားဝှက်ပို့ပါ:**");
+        } else {
+            // Not a phone number, ignore
+            return;
         }
     }
     
+    // Step 2: Get password and login (စကားဝှက်လက်ခံမယ်)
     if (user_db[chatId].awaitingPassword && !user_db[chatId].token) {
         const rawPhone = user_db[chatId].tempPhone;
+        
+        // Format phone number for API (remove 0, add 95 if needed)
         let formattedPhone = rawPhone;
         
-        // Format phone correctly
-        if (rawPhone.startsWith('09')) {
+        // If starts with 95, keep as is
+        if (rawPhone.startsWith('95')) {
+            formattedPhone = rawPhone;
+        }
+        // If starts with 09, convert to 95
+        else if (rawPhone.startsWith('09')) {
+            formattedPhone = '95' + rawPhone.substring(2);
+        }
+        // If starts with 9 (without 0)
+        else if (rawPhone.startsWith('9')) {
             formattedPhone = '95' + rawPhone.substring(1);
-        } else if (rawPhone.startsWith('0')) {
+        }
+        // If starts with 0
+        else if (rawPhone.startsWith('0')) {
             formattedPhone = '95' + rawPhone.substring(1);
-        } else if (!rawPhone.startsWith('95')) {
+        }
+        // Otherwise add 95
+        else {
             formattedPhone = '95' + rawPhone;
         }
         
-        console.log(`Login: ${rawPhone} -> ${formattedPhone}`);
+        console.log(`📱 Login: ${rawPhone} → ${formattedPhone}`);
         
-        const res = await callApi("Login", { 
-            phonetype: -1, language: 7, logintype: "mobile", 
-            username: formattedPhone, pwd: text 
+        // Send login request
+        const loginRes = await callApi("Login", { 
+            phonetype: -1, 
+            language: 7, 
+            logintype: "mobile", 
+            username: formattedPhone, 
+            pwd: text 
         });
         
-        if (res?.msgCode === 0) {
-            user_db[chatId].token = res.data.tokenHeader + res.data.token;
+        console.log(`📡 Login Response:`, JSON.stringify(loginRes));
+        
+        if (loginRes?.msgCode === 0) {
+            user_db[chatId].token = loginRes.data.tokenHeader + loginRes.data.token;
+            user_db[chatId].userId = loginRes.data.userId;
             delete user_db[chatId].tempPhone;
             delete user_db[chatId].awaitingPassword;
-            bot.sendMessage(chatId, "✅ **Login အောင်မြင်ပါပြီ!**\n\nStart Auto နှိပ်ပါ။", menu);
+            
+            bot.sendMessage(chatId, "✅ **Login အောင်မြင်ပါပြီ!**\n\n🚀 Start Auto နှိပ်ပါ။", menu);
             
             // Show balance
             const info = await callApi("GetUserInfo", {}, user_db[chatId].token);
             if (info?.msgCode === 0) {
-                bot.sendMessage(chatId, `💰 Balance: ${info.data.amount} MMK`);
+                bot.sendMessage(chatId, `💰 **Balance:** ${info.data.amount} MMK`);
             }
         } else {
             delete user_db[chatId].tempPhone;
             delete user_db[chatId].awaitingPassword;
-            bot.sendMessage(chatId, "❌ **Login မှားယွင်းနေပါသည်။**\n\n/start ပြန်လုပ်ပါ။");
+            
+            let errorMsg = "❌ **Login မှားယွင်းနေပါသည်။**\n\n";
+            errorMsg += "**စစ်ဆေးရန်:**\n";
+            errorMsg += "• ဖုန်းနံပါတ်: `" + formattedPhone + "`\n";
+            errorMsg += "• စကားဝှက်: မှန်ကန်သလား\n\n";
+            errorMsg += "**Website မှာ ဝင်ကြည့်ပါ:**\n";
+            errorMsg += "အဲဒီအကောင့်နဲ့ ဝင်လို့ရလား စစ်ပါ။\n\n";
+            errorMsg += "/start ပြန်လုပ်ပါ။";
+            
+            bot.sendMessage(chatId, errorMsg);
         }
     }
 });
@@ -238,11 +298,13 @@ bot.on('callback_query', (q) => {
     if (q.data === "cycle") {
         const f = ["SMART", "FOLLOW", "OPPOSITE", "RANDOM"];
         user_db[chatId].formula = f[(f.indexOf(user_db[chatId].formula) + 1) % f.length];
+        bot.answerCallbackQuery(q.id, { text: `Formula: ${user_db[chatId].formula}` });
     } else if (q.data === "mode") {
         user_db[chatId].typeId = user_db[chatId].typeId === 30 ? 1 : 30;
+        bot.answerCallbackQuery(q.id, { text: `Mode: ${user_db[chatId].typeId === 30 ? "30s" : "1min"}` });
     }
-    bot.answerCallbackQuery(q.id);
     bot.sendMessage(chatId, `🔄 Updated: Formula=${user_db[chatId].formula}, Mode=${user_db[chatId].typeId === 30 ? "30s" : "1min"}`);
 });
 
-console.log('🤖 BigWin Pro Console v6.4 Started!');
+console.log('🤖 BigWin Pro Console v6.5 Started!');
+console.log('📱 Phone format: 95xxxxxxxxx (9-12 digits)');
