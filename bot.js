@@ -5,15 +5,78 @@ const http = require('http');
 const https = require('https');
 
 // Keep Alive
-http.createServer((req, res) => { 
-    res.end('BigWin 30s Bot Active'); 
-}).listen(process.env.PORT || 8080);
+const server = http.createServer((req, res) => { 
+    res.writeHead(200);
+    res.end('BigWin Bot Active - ' + new Date().toISOString()); 
+});
+server.listen(process.env.PORT || 8080, () => {
+    console.log(`✅ Server running on port ${process.env.PORT || 8080}`);
+});
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7F9bE-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
-const bot = new TelegramBot(token, { polling: true });
+
+// Bot options with better error handling
+const botOptions = {
+    polling: {
+        interval: 300,
+        autoStart: true,
+        params: {
+            timeout: 10
+        }
+    }
+};
+
+let bot;
+try {
+    bot = new TelegramBot(token, botOptions);
+    console.log('✅ Telegram Bot initialized successfully');
+} catch (err) {
+    console.error('❌ Bot initialization failed:', err.message);
+    process.exit(1);
+}
 
 let user_db = {};
+
+// Error handlers for bot
+bot.on('polling_error', (err) => {
+    console.error('Polling error:', err.code, err.message);
+    if (err.code === 'EFATAL' || err.message.includes('409')) {
+        console.log('Restarting bot polling...');
+        setTimeout(() => {
+            bot.stopPolling().then(() => {
+                bot.startPolling();
+            });
+        }, 5000);
+    }
+});
+
+bot.on('error', (err) => {
+    console.error('Bot error:', err);
+});
+
+bot.on('webhook_error', (err) => {
+    console.error('Webhook error:', err);
+});
+
+// Test command to check if bot is alive
+bot.onText(/\/ping/, (msg) => {
+    const chatId = msg.chat.id;
+    bot.sendMessage(chatId, '🏓 Pong! Bot is alive!');
+    console.log(`Ping from ${chatId}`);
+});
+
+// Simple echo for testing
+bot.on('message', (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    console.log(`Received: "${text}" from ${chatId}`);
+    
+    // Respond to any message for testing
+    if (text === '/test123') {
+        bot.sendMessage(chatId, '✅ Bot is working!');
+    }
+});
 
 const agent = new https.Agent({
     rejectUnauthorized: false,
@@ -21,7 +84,6 @@ const agent = new https.Agent({
     timeout: 60000
 });
 
-// Signature Function (based on actual payload)
 function signMd5(data) {
     let temp = { ...data };
     delete temp.signature;
@@ -33,17 +95,12 @@ function signMd5(data) {
     sortedKeys.forEach(key => { sortedData[key] = temp[key]; });
     
     const jsonStr = JSON.stringify(sortedData).replace(/ /g, '');
-    console.log("String to sign:", jsonStr);
     return crypto.createHash('md5').update(jsonStr).digest('hex').toUpperCase();
 }
 
-// API Call Function
 async function callApi(endpoint, payload, authToken = null) {
-    // Generate random and timestamp
     payload.random = crypto.randomBytes(16).toString('hex');
     payload.timestamp = Math.floor(Date.now() / 1000);
-    
-    // Calculate signature AFTER adding random and timestamp
     payload.signature = signMd5(payload);
     
     const headers = { 
@@ -58,7 +115,6 @@ async function callApi(endpoint, payload, authToken = null) {
             timeout: 30000,
             httpsAgent: agent
         });
-        console.log(`${endpoint} Response:`, res.data);
         return res.data;
     } catch (e) { 
         console.error(`API Error [${endpoint}]:`, e.code || e.message);
@@ -66,38 +122,28 @@ async function callApi(endpoint, payload, authToken = null) {
     }
 }
 
-// Get Game History
 async function getGameHistory(token) {
-    const payload = {
-        pageNo: 1,
-        pageSize: 15,
-        language: 7,
-        typeId: 30
-    };
+    const payload = { pageNo: 1, pageSize: 15, language: 7, typeId: 30 };
     return await callApi("GetNoaverageEmerdList", payload, token);
 }
 
-// Place Bet - FIXED selectType
 async function placeBet(amount, issueNumber, isBig, token) {
     const payload = {
         typeId: 30,
         issuenumber: issueNumber,
         amount: amount,
-        betCount: 7,  // Fixed betCount as per your example
+        betCount: 7,
         gameType: 2,
-        selectType: isBig ? 13 : 14,  // 13 = Big, 14 = Small
+        selectType: isBig ? 13 : 14,
         language: 7
     };
-    console.log("Bet Payload:", JSON.stringify(payload, null, 2));
     return await callApi("GameBetting", payload, token);
 }
 
-// Get User Balance
 async function getUserBalance(token) {
     return await callApi("GetUserInfo", {}, token);
 }
 
-// Decision Logic
 function getDecision(history, formulaType) {
     const last5 = history.slice(0, 5).map(i => {
         const num = parseInt(i.number);
@@ -118,7 +164,6 @@ function getDecision(history, formulaType) {
     }
 }
 
-// Main Auto-Betting Loop
 async function monitoring30s(chatId) {
     const data = user_db[chatId];
     
@@ -131,17 +176,12 @@ async function monitoring30s(chatId) {
                 const currentIssue = history[0].issueNumber;
                 const currentNumber = history[0].number;
                 
-                // Show current result
                 if (currentNumber && currentNumber !== "null" && currentNumber !== data.lastShownNumber) {
                     const resultText = parseInt(currentNumber) >= 5 ? "🔴 BIG" : "🔵 SMALL";
-                    bot.sendMessage(chatId, 
-                        `🎲 **RESULT** ${currentIssue.slice(-6)}\n` +
-                        `🔢 ${currentNumber} → ${resultText}`
-                    );
+                    await bot.sendMessage(chatId, `🎲 **RESULT** ${currentIssue.slice(-6)}\n🔢 ${currentNumber} → ${resultText}`);
                     data.lastShownNumber = currentNumber;
                 }
                 
-                // Check previous bet result
                 if (data.lastBetIssue && data.lastBetIssue !== currentIssue) {
                     const lastResult = history.find(h => h.issueNumber === data.lastBetIssue);
                     if (lastResult && lastResult.number && lastResult.number !== "null") {
@@ -152,43 +192,32 @@ async function monitoring30s(chatId) {
                             const winAmount = data.lastBetAmount * 0.97;
                             data.sessionProfit += winAmount;
                             data.step = 0;
-                            data.consecutiveLoss = 0;
-                            bot.sendMessage(chatId, 
-                                `✅ **WIN!** +${winAmount.toFixed(0)}\n` +
-                                `📈 Total: ${data.sessionProfit.toFixed(0)} MMK`
-                            );
+                            await bot.sendMessage(chatId, `✅ **WIN!** +${winAmount.toFixed(0)}\n📈 Total: ${data.sessionProfit.toFixed(0)} MMK`);
                         } else {
                             data.sessionProfit -= data.lastBetAmount;
                             data.step = (data.step + 1) % data.betPlan.length;
-                            data.consecutiveLoss = (data.consecutiveLoss || 0) + 1;
-                            bot.sendMessage(chatId, 
-                                `❌ **LOSS!** -${data.lastBetAmount}\n` +
-                                `📈 Total: ${data.sessionProfit.toFixed(0)} MMK\n` +
-                                `📊 Next Bet: ${data.betPlan[data.step]} MMK`
-                            );
+                            await bot.sendMessage(chatId, `❌ **LOSS!** -${data.lastBetAmount}\n📈 Total: ${data.sessionProfit.toFixed(0)} MMK\n📊 Next: ${data.betPlan[data.step]} MMK`);
                         }
                         
-                        // Check stop loss / target
                         if (data.sessionProfit <= -(data.stopLoss || 5000)) {
-                            bot.sendMessage(chatId, `🛑 **STOP LOSS!** ${data.sessionProfit} MMK`);
+                            await bot.sendMessage(chatId, `🛑 STOP LOSS! ${data.sessionProfit} MMK`);
                             data.running = false;
                             break;
                         }
                         if (data.sessionProfit >= (data.targetProfit || 3000)) {
-                            bot.sendMessage(chatId, `🎉 **TARGET!** ${data.sessionProfit} MMK`);
+                            await bot.sendMessage(chatId, `🎉 TARGET! ${data.sessionProfit} MMK`);
                             data.running = false;
                             break;
                         }
                     }
                 }
                 
-                // Place new bet
                 const nextIssue = (BigInt(currentIssue) + 1n).toString();
                 const decision = getDecision(history, data.formula);
                 const betAmount = data.betPlan[data.step];
                 const isBig = decision === "Big";
                 
-                bot.sendMessage(chatId, `⏳ Betting ${decision} - ${betAmount} MMK on ${nextIssue.slice(-6)}`);
+                await bot.sendMessage(chatId, `⏳ Betting ${decision} - ${betAmount} MMK on ${nextIssue.slice(-6)}`);
                 
                 const betRes = await placeBet(betAmount, nextIssue, isBig, data.token);
                 
@@ -196,9 +225,9 @@ async function monitoring30s(chatId) {
                     data.lastBetIssue = currentIssue;
                     data.lastBetPick = decision;
                     data.lastBetAmount = betAmount;
-                    bot.sendMessage(chatId, `✅ **BET PLACED!** ${decision} ${betAmount} MMK`);
+                    await bot.sendMessage(chatId, `✅ **BET PLACED!** ${decision} ${betAmount} MMK`);
                 } else {
-                    bot.sendMessage(chatId, `⚠️ **BET FAILED!** ${betRes?.msg || "Error"}`);
+                    await bot.sendMessage(chatId, `⚠️ BET FAILED! ${betRes?.msg || "Error"}`);
                 }
             }
         } catch (error) {
@@ -210,11 +239,31 @@ async function monitoring30s(chatId) {
 }
 
 // Commands
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    console.log(`Start command from ${chatId}`);
+    bot.sendMessage(chatId, 
+        `🤖 **30s BIG/SMALL BOT**\n\n` +
+        `Commands:\n` +
+        `/ping - Check if bot is alive\n` +
+        `/start30s - Start betting\n` +
+        `/stop - Stop betting\n` +
+        `/status - Check status\n` +
+        `/balance - Check balance\n` +
+        `/plan 10,30,90,270,810\n` +
+        `/formula SMART\n\n` +
+        `First, login by sending:\n` +
+        `1️⃣ Your phone number (09xxxxxxxxx)\n` +
+        `2️⃣ Your password`
+    );
+});
+
 bot.onText(/\/start30s/, async (msg) => {
     const chatId = msg.chat.id;
+    console.log(`Start30s from ${chatId}`);
     
     if (!user_db[chatId]?.token) {
-        return bot.sendMessage(chatId, "❌ Login first!\nSend 09xxxxxxxxx");
+        return bot.sendMessage(chatId, "❌ Login first! Send 09xxxxxxxxx");
     }
     if (user_db[chatId]?.running) {
         return bot.sendMessage(chatId, "⚠️ Bot already running!");
@@ -231,19 +280,19 @@ bot.onText(/\/start30s/, async (msg) => {
         targetProfit: user_db[chatId].targetProfit || 3000
     };
     
-    bot.sendMessage(chatId, `🎲 **30s BOT STARTED!**\n💰 Plan: ${user_db[chatId].betPlan.join(', ')}\n🎯 Formula: ${user_db[chatId].formula}`);
+    await bot.sendMessage(chatId, `🎲 **30s BOT STARTED!**\n💰 Plan: ${user_db[chatId].betPlan.join(', ')}\n🎯 Formula: ${user_db[chatId].formula}`);
     monitoring30s(chatId);
 });
 
-bot.onText(/\/stop/, async (msg) => {
+bot.onText(/\/stop/, (msg) => {
     const chatId = msg.chat.id;
     if (user_db[chatId]) {
         user_db[chatId].running = false;
-        bot.sendMessage(chatId, `🛑 **STOPPED** Profit: ${(user_db[chatId].sessionProfit || 0).toFixed(0)} MMK`);
+        bot.sendMessage(chatId, `🛑 STOPPED Profit: ${(user_db[chatId].sessionProfit || 0).toFixed(0)} MMK`);
     }
 });
 
-bot.onText(/\/status/, async (msg) => {
+bot.onText(/\/status/, (msg) => {
     const chatId = msg.chat.id;
     const d = user_db[chatId] || {};
     bot.sendMessage(chatId, 
@@ -262,10 +311,12 @@ bot.onText(/\/balance/, async (msg) => {
     const info = await getUserBalance(user_db[chatId].token);
     if (info?.msgCode === 0) {
         bot.sendMessage(chatId, `💰 Balance: ${info.data.amount} MMK`);
+    } else {
+        bot.sendMessage(chatId, "❌ Failed to get balance");
     }
 });
 
-bot.onText(/\/plan (.+)/, async (msg, match) => {
+bot.onText(/\/plan (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const plan = match[1].split(',').map(Number);
     if (plan.length >= 2 && plan.every(n => n > 0)) {
@@ -273,32 +324,21 @@ bot.onText(/\/plan (.+)/, async (msg, match) => {
         user_db[chatId].betPlan = plan;
         user_db[chatId].step = 0;
         bot.sendMessage(chatId, `✅ Plan: ${plan.join(', ')} MMK`);
+    } else {
+        bot.sendMessage(chatId, "❌ Use: /plan 10,30,90,270,810");
     }
 });
 
-bot.onText(/\/formula (.+)/, async (msg, match) => {
+bot.onText(/\/formula (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const formula = match[1].toUpperCase();
     if (["SMART", "FOLLOW", "OPPOSITE", "RANDOM"].includes(formula)) {
         if (!user_db[chatId]) user_db[chatId] = {};
         user_db[chatId].formula = formula;
         bot.sendMessage(chatId, `✅ Formula: ${formula}`);
+    } else {
+        bot.sendMessage(chatId, "❌ Use: SMART, FOLLOW, OPPOSITE, RANDOM");
     }
-});
-
-bot.onText(/\/help/, async (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId,
-        `🤖 **COMMANDS**\n\n` +
-        `🔐 Login: 09xxx then password\n` +
-        `/start30s - Start bot\n` +
-        `/stop - Stop bot\n` +
-        `/status - Check status\n` +
-        `/balance - Check balance\n` +
-        `/plan 10,30,90,270,810\n` +
-        `/formula SMART\n` +
-        `/help - This menu`
-    );
 });
 
 // Login Handler
@@ -306,14 +346,18 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
     
-    if (!user_db[chatId]) user_db[chatId] = {};
+    // Skip commands
     if (text.startsWith('/')) return;
     
+    if (!user_db[chatId]) user_db[chatId] = {};
+    
+    // Phone number (9-11 digits)
     if (/^\d{9,11}$/.test(text) && !user_db[chatId].token) {
         user_db[chatId].tempPhone = text;
-        return bot.sendMessage(chatId, "🔐 Send password:");
+        return bot.sendMessage(chatId, "🔐 Send your password:");
     }
     
+    // Password
     if (user_db[chatId].tempPhone && !user_db[chatId].token) {
         const phone = "95" + user_db[chatId].tempPhone.replace(/^0/, '');
         const loginRes = await callApi("Login", { 
@@ -324,12 +368,19 @@ bot.on('message', async (msg) => {
         if (loginRes?.msgCode === 0) {
             user_db[chatId].token = loginRes.data.tokenHeader + loginRes.data.token;
             delete user_db[chatId].tempPhone;
-            bot.sendMessage(chatId, "✅ **LOGIN SUCCESS!**\nType /help");
+            bot.sendMessage(chatId, "✅ **LOGIN SUCCESS!**\nType /start30s to begin");
+            
+            // Show balance
+            const info = await getUserBalance(user_db[chatId].token);
+            if (info?.msgCode === 0) {
+                bot.sendMessage(chatId, `💰 Balance: ${info.data.amount} MMK`);
+            }
         } else {
             delete user_db[chatId].tempPhone;
-            bot.sendMessage(chatId, "❌ **LOGIN FAILED!**");
+            bot.sendMessage(chatId, "❌ **LOGIN FAILED!**\nType /start to try again");
         }
     }
 });
 
-console.log('🤖 Bot Running...');
+console.log('🤖 Bot is running and waiting for messages...');
+console.log(`📡 Web server on port ${process.env.PORT || 8080}`);
