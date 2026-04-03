@@ -105,7 +105,7 @@ bot.on('message', async (msg) => {
       let txt = "📊 **Game Results (Last 100)**\n\n";
       res.data.list.forEach(i => {
         let n = parseInt(i.number);
-        txt += `▪️ ${i.issueNumber.slice(-2)} ➡️ ${n} (${n >= 5 ? 'Big' : 'Small'})\n`;
+        txt += `▪️ ${i.issueNumber.slice(-‎3)} ➡️ ${n} (${n >= 5 ? 'Big' : 'Small'})\n`;
       });
       return bot.sendMessage(chatId, txt, { parse_mode: 'Markdown' });
     }
