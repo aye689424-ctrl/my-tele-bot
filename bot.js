@@ -3,27 +3,23 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-// --- ဒီအပိုင်းက Render မှာ Bot မရပ်သွားအောင် လုပ်ပေးတာပါ (မဖြုတ်ပါနဲ့) ---
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.write('AI Bot is Running!');
   res.end();
 });
 
-// Render ရဲ့ Port ကို နားထောင်ခြင်း
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-// --- Configuration ---
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// --- Helper Functions ---
 function signMd5(data) {
   let temp = { ...data };
   delete temp.signature;
@@ -41,14 +37,12 @@ async function callApi(endpoint, payload, authToken = null) {
   payload.signature = signMd5(payload);
   const headers = { "Content-Type": "application/json;charset=UTF-8" };
   if (authToken) headers["Authorization"] = authToken;
-
   try {
     const response = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 10000 });
     return response.data;
   } catch (error) { return null; }
 }
 
-// --- AI Brains Strategy ---
 function aiBrainConsensus(history) {
   const results = history.slice(0, 10).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
   const lastVal = results[0];
@@ -60,21 +54,18 @@ function aiBrainConsensus(history) {
   return { finalDecision, confidence };
 }
 
-// --- Monitoring Loop ---
 async function monitoringLoop(chatId) {
   while (user_db[chatId] && user_db[chatId].running) {
     const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 30, language: 0, typeId: 1 }, data.token);
-
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: 1 }, data.token);
     if (res && res.msgCode === 0) {
       const history = res.data.list;
       const currIssue = history[0].issueNumber;
-
       if (currIssue !== data.last_issue) {
         if (data.last_pred) {
           const realRes = parseInt(history[0].number) >= 5 ? "Big" : "Small";
           const isWin = data.last_pred === realRes ? "✅ WIN" : "❌ LOSS";
-          data.predictions.push(`🔹 Issue: ${currIssue.slice(-2)} | P: ${data.last_pred} | R: ${realRes} | ${isWin}`);
+          data.predictions.push(`🔹 Issue: ${currIssue.slice(-3)} | P: ${data.last_pred} | R: ${realRes} | ${isWin}`);
         }
         const { finalDecision, confidence } = aiBrainConsensus(history);
         data.last_pred = finalDecision;
@@ -87,54 +78,46 @@ async function monitoringLoop(chatId) {
   }
 }
 
-// --- Handlers ---
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
   if (!text) return;
-
   if (text === '/start') {
     delete user_db[chatId];
     return bot.sendMessage(chatId, "🤖 **BigWin AI Pro**\n\nLogin ဝင်ရန် ဖုန်းနံပါတ်ပေးပါ (09xxx):");
   }
-
   if (text === "📊 Results History") {
     const data = user_db[chatId];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 100, language: 0, typeId: 1 }, data?.token);
+    const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 0, typeId: 1 }, data?.token);
     if (res && res.msgCode === 0) {
-      let txt = "📊 **Game Results (Last 100)**\n\n";
+      let txt = "📊 **Game Results (Last 15)**\n\n";
       res.data.list.forEach(i => {
         let n = parseInt(i.number);
-        txt += `▪️ ${i.issueNumber.slice(-‎3)} ➡️ ${n} (${n >= 5 ? 'Big' : 'Small'})\n`;
+        txt += `▪️ ${i.issueNumber.slice(-3)} ➡️ ${n} (${n >= 5 ? 'Big' : 'Small'})\n`;
       });
       return bot.sendMessage(chatId, txt, { parse_mode: 'Markdown' });
     }
     return bot.sendMessage(chatId, "❌ အချက်အလက်ယူမရပါ။");
   }
-
   if (text === "🧠 Prediction History") {
     const logs = user_db[chatId]?.predictions || [];
     if (logs.length === 0) return bot.sendMessage(chatId, "မှတ်တမ်းမရှိသေးပါ။");
-    return bot.sendMessage(chatId, "🧠 **AI Log (Last 100)**\n\n" + logs.slice(-100).join("\n"));
+    return bot.sendMessage(chatId, "🧠 **AI Log (Last 15)**\n\n" + logs.slice(-15).join("\n"));
   }
-
   if (text === "🚀 Start AI") {
     if (!user_db[chatId]?.token) return bot.sendMessage(chatId, "အရင် Login ဝင်ပါ။");
     user_db[chatId].running = true;
     monitoringLoop(chatId);
     return bot.sendMessage(chatId, "🚀 **AI Monitoring စတင်ပါပြီ**");
   }
-
   if (text === "🛑 Stop AI") {
     if (user_db[chatId]) user_db[chatId].running = false;
     return bot.sendMessage(chatId, "🛑 AI Monitoring ရပ်တန့်လိုက်ပါပြီ။");
   }
-
   if (/^\d{9,11}$/.test(text) && !user_db[chatId]) {
     user_db[chatId] = { phone: text, running: false, predictions: [] };
     return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
   }
-
   if (user_db[chatId] && !user_db[chatId].token) {
     const payload = { phonetype: -1, language: 0, logintype: "mobile", username: "95" + user_db[chatId].phone.replace(/^0/, ''), pwd: text };
     const res = await callApi("Login", payload);
