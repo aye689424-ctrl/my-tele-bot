@@ -6,7 +6,7 @@ const dns = require('dns');
 
 dns.setDefaultResultOrder('ipv4first');
 
-http.createServer((req, res) => { res.end('BigWin Pro Console v7.1 Active'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('BigWin Pro Console v7.3 Active'); }).listen(process.env.PORT || 8080);
 
 const token = '8676836403:AAF-3RPr09Um45gDtI74YfnA05lsMnMnIQ8';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -109,9 +109,7 @@ async function monitoringLoop(chatId) {
                 data.last_issue = currIssue;
 
                 if (betRes && betRes.msgCode === 0) {
-                    bot.sendMessage(chatId, `✅ Bet Success: ${decision} ${currentBetAmt} MMK`);
-                } else {
-                    bot.sendMessage(chatId, `❌ Bet Failed: ${betRes?.msg || "Error"}`);
+                    bot.sendMessage(chatId, `✅ Bet: ${decision} ${currentBetAmt} MMK`);
                 }
             }
         }
@@ -143,8 +141,8 @@ bot.on('message', async (msg) => {
 
     if (text === '/start') {
         return bot.sendMessage(chatId, 
-            "🤖 **BigWin Pro Console v7.1**\n\n" +
-            "ဖုန်းနံပါတ်ပို့ပါ (09... သို့ 95...):", 
+            "🤖 **BigWin Pro Console v7.3**\n\n" +
+            "ဖုန်းနံပါတ်ပို့ပါ (9696740902 ပုံစံ):", 
             { reply_markup: { remove_keyboard: true } }
         );
     }
@@ -193,36 +191,45 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "✅ Plan updated");
     }
 
-    // ========== FIXED LOGIN - NO CONVERSION ==========
-    // Step 1: Get phone number (any format, keep as is)
+    // ========== LOGIN - FIXED FOR 9696740902 FORMAT ==========
     if (!user_db[chatId].token && !user_db[chatId].awaitingPassword) {
         let cleanPhone = text.replace(/[^0-9]/g, '');
-        if (cleanPhone.length >= 9 && cleanPhone.length <= 12) {
-            user_db[chatId].tempPhone = text;  // Keep original
+        // Accept 10 digit phone (9696740902)
+        if (cleanPhone.length === 10) {
+            user_db[chatId].tempPhone = cleanPhone;
             user_db[chatId].awaitingPassword = true;
             return bot.sendMessage(chatId, "🔐 Password ပို့ပါ:");
         }
         return;
     }
     
-    // Step 2: Login with ORIGINAL phone number (no conversion)
     if (user_db[chatId].awaitingPassword && !user_db[chatId].token) {
-        const originalPhone = user_db[chatId].tempPhone;
+        let rawPhone = user_db[chatId].tempPhone;
         
-        // Use the phone number AS IS - no conversion
-        const loginRes = await callApi("Login", { 
-            phonetype: -1, 
-            language: 7, 
-            logintype: "mobile", 
-            username: originalPhone,  // ← No conversion!
-            pwd: text 
+        // Format: 9696740902 → +959696740902
+        let formattedPhone = rawPhone;
+        if (!formattedPhone.startsWith('+95')) {
+            formattedPhone = '+95' + formattedPhone;
+        }
+        
+        console.log("Original phone:", rawPhone);
+        console.log("Formatted phone:", formattedPhone);
+        
+        // ✅ Login with +95 format
+        const res = await callApi("Login", { 
+            username: formattedPhone,
+            pwd: text,
+            phonetype: 1,
+            logintype: "mobile",
+            packId: "",
+            deviceId: crypto.randomBytes(16).toString('hex'),
+            language: 7
         });
         
-        console.log("Login with:", originalPhone);
-        console.log("Response:", loginRes?.msgCode, loginRes?.msg);
+        console.log("Login Response:", res?.msgCode, res?.msg);
         
-        if (loginRes?.msgCode === 0) {
-            user_db[chatId].token = loginRes.data.tokenHeader + loginRes.data.token;
+        if (res?.msgCode === 0) {
+            user_db[chatId].token = res.data.tokenHeader + res.data.token;
             delete user_db[chatId].tempPhone;
             delete user_db[chatId].awaitingPassword;
             return bot.sendMessage(chatId, "✅ **Login Success!**\n\n🚀 Start Auto နှိပ်ပါ။", menu);
@@ -231,8 +238,10 @@ bot.on('message', async (msg) => {
             delete user_db[chatId].awaitingPassword;
             return bot.sendMessage(chatId, 
                 "❌ **Login Failed!**\n\n" +
-                "သင်ပို့တဲ့ဖုန်းနံပါတ်: `" + originalPhone + "`\n\n" +
-                "Website မှာ ဒီအတိုင်း ဝင်ကြည့်ပါ။\n" +
+                "ဖုန်းနံပါတ်: `" + formattedPhone + "`\n\n" +
+                "စစ်ဆေးရန်:\n" +
+                "1. ဖုန်းနံပါတ်မှန်ကန်သလား (9696740902)\n" +
+                "2. စကားဝှက်မှန်ကန်သလား\n\n" +
                 "/start ပြန်လုပ်ပါ။"
             );
         }
@@ -251,4 +260,5 @@ bot.on('callback_query', (q) => {
     bot.sendMessage(chatId, "🔄 Updated");
 });
 
-console.log('🤖 Bot Started - Login with EXACT phone number (no conversion)');
+console.log('🤖 Bot Started!');
+console.log('📱 Phone format: 9696740902 → +959696740902');
