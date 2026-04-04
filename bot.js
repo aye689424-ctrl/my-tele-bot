@@ -2,257 +2,148 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
-const dns = require('dns');
 
-dns.setDefaultResultOrder('ipv4first');
+// Render Keep Alive
+http.createServer((req, res) => { res.end('WinGo Pattern AI Active'); }).listen(process.env.PORT || 8080);
 
-http.createServer((req, res) => { res.end('BigWin Pro Console v7.5 Active'); }).listen(process.env.PORT || 8080);
-
-const token = '8676836403:AAF-3RPr09Um45gDtI74YfnA05lsMnMnIQ8';
+const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// Fixed deviceId (ခင်ဗျား payload ထဲက deviceId)
-const FIXED_DEVICE_ID = "36ff1811c56f8853613b532fe47307d8";
-
+// --- 🛡️ Signature (Based on AiScript.bot) ---
 function signMd5(data) {
     let temp = { ...data };
-    delete temp.signature;
-    delete temp.timestamp;
-    delete temp.random;
+    delete temp.signature; delete temp.timestamp;
     const sortedKeys = Object.keys(temp).sort();
     let sortedData = {};
     sortedKeys.forEach(key => { sortedData[key] = temp[key]; });
     const jsonStr = JSON.stringify(sortedData).replace(/ /g, '');
-    console.log("String to sign:", jsonStr);
-    return crypto.createHash('md5').update(jsonStr).digest('hex').toUpperCase();
+    return crypto.createHash('md5').update(jsonStr).digest('hex').toLowerCase();
 }
 
 async function callApi(endpoint, payload, authToken = null) {
+    payload.random = crypto.randomUUID().replace(/-/g, '');
     payload.timestamp = Math.floor(Date.now() / 1000);
-    payload.random = crypto.randomBytes(16).toString('hex');
-    payload.signature = signMd5(payload);
-    
-    const headers = { 
-        "Content-Type": "application/json;charset=UTF-8", 
-        "Authorization": authToken || "",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    };
-
+    payload.signature = signMd5(payload).toUpperCase();
+    const headers = { "Content-Type": "application/json;charset=UTF-8", "Authorization": authToken || "" };
     try {
-        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 20000 });
-        console.log(`${endpoint}:`, res.data?.msgCode, res.data?.msg);
+        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 15000 });
         return res.data;
-    } catch (e) { 
-        console.log(`API Error:`, e.code);
-        return { msgCode: -1, msg: "Network Error" }; 
-    }
+    } catch (e) { return null; }
 }
 
-function getDecision(history, formulaType) {
-    const last10 = history.slice(0, 10).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
-    const last = last10[0];
-    if (formulaType === "FOLLOW") return last;
-    if (formulaType === "OPPOSITE") return last === "Big" ? "Small" : "Big";
-    if (formulaType === "RANDOM") return Math.random() > 0.5 ? "Big" : "Small";
-    if (formulaType === "SMART") {
-        const bigs = last10.filter(v => v === "Big").length;
-        return bigs >= 5 ? "Small" : "Big";
+// --- 🧠 10 Brains Markov Decision Logic ---
+function getAIVote(history) {
+    const results = history.slice(0, 15).map(i => (parseInt(i.number) >= 5 ? "B" : "S"));
+    const currentPattern = results.slice(0, 3).reverse().join("-"); // ဥပမာ B-S-B
+    let votes = { B: 0, S: 0, reason: "" };
+
+    // Brain 1-4: Markov Chain Pattern Strength
+    if (currentPattern === "B-S-B") { votes.S += 4; votes.reason = "Markov Transition (B-S-B ➔ S)"; }
+    else if (currentPattern === "S-B-S") { votes.B += 4; votes.reason = "Markov Transition (S-B-S ➔ B)"; }
+    else if (currentPattern === "B-B-S") { votes.B += 3; votes.reason = "Double-Back Strategy (B-B-S ➔ B)"; }
+    else if (currentPattern === "S-S-B") { votes.S += 3; votes.reason = "Double-Back Strategy (S-S-B ➔ S)"; }
+
+    // Brain 5-7: Trend Analysis (Dragon vs Mirror)
+    if (results[0] === results[1] && results[1] === results[2]) {
+        votes[results[0]] += 3; // Dragon (Follow)
+        votes.reason += " | Dragon Trend Follow";
+    } else {
+        votes[results[0] === "B" ? "S" : "B"] += 2; // Mirror (Opposite)
+        votes.reason += " | Mirror/Chaos Logic";
     }
-    return last;
+
+    // Brain 8-10: Volume & Probability
+    const bCount = results.filter(x => x === "B").length;
+    if (bCount > 8) { votes.S += 2; } else { votes.B += 2; }
+
+    const final = votes.B > votes.S ? "Big" : "Small";
+    const confidence = Math.round((Math.max(votes.B, votes.S) / (votes.B + votes.S)) * 100);
+    
+    return { final, confidence, currentPattern, reason: votes.reason };
 }
 
+// --- 🚀 AI Monitoring Loop ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, language: 7, typeId: data.typeId }, data.token);
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, language: 7, typeId: data.typeId }, data.token);
 
-        if (res && res.msgCode === 0 && res.data && res.data.list.length > 0) {
+        if (res && res.msgCode === 0 && res.data?.list?.length > 0) {
             const history = res.data.list;
             const currIssue = history[0].issueNumber;
 
             if (currIssue !== data.last_issue) {
-                if (data.last_pred && data.last_issue) {
-                    const lastResult = history.find(h => h.issueNumber === data.last_issue);
-                    if (lastResult && lastResult.number && lastResult.number !== "null") {
-                        const realRes = parseInt(lastResult.number) >= 5 ? "Big" : "Small";
-                        const win = (data.last_pred === realRes);
-                        const betAmt = data.betPlan[data.step];
-                        
-                        if (win) {
-                            data.sessionProfit += (betAmt * 0.95);
-                            data.step = 0;
-                            bot.sendMessage(chatId, `✅ WIN! +${(betAmt * 0.95).toFixed(0)} | Total: ${data.sessionProfit.toFixed(0)}`);
-                        } else {
-                            data.sessionProfit -= betAmt;
-                            data.step = (data.step + 1) % data.betPlan.length;
-                            bot.sendMessage(chatId, `❌ LOSS! -${betAmt} | Total: ${data.sessionProfit.toFixed(0)}`);
-                        }
-                    }
+                // အရင်ပွဲ ခန့်မှန်းချက် မှန်/မမှန် စစ်ဆေးခြင်း
+                if (data.last_pred) {
+                    const real = parseInt(history[0].number) >= 5 ? "Big" : "Small";
+                    const win = data.last_pred === real;
+                    const logMsg = `${currIssue.slice(-3)}: ${real} (${win ? "✅ Win" : "❌ Loss"})`;
+                    data.historyLogs.unshift(logMsg);
+                    if (data.historyLogs.length > 10) data.historyLogs.pop();
                 }
 
-                const decision = getDecision(history, data.formula);
+                // AI ဦးနှောက် ၁၀ ခု၏ ဆုံးဖြတ်ချက်ကို ယူခြင်း
+                const ai = getAIVote(history);
                 const nextIssue = (BigInt(currIssue) + 1n).toString();
-                const currentBetAmt = data.betPlan[data.step];
-
-                const betPayload = {
-                    "typeId": data.typeId,
-                    "issuenumber": nextIssue,
-                    "amount": currentBetAmt,
-                    "betCount": 7,
-                    "gameType": 2,
-                    "selectType": (decision === "Big" ? 13 : 14),
-                    "language": 7
-                };
-
-                const betRes = await callApi("GameBetting", betPayload, data.token);
                 
-                data.last_pred = decision; 
+                data.last_pred = ai.final;
                 data.last_issue = currIssue;
 
-                if (betRes && betRes.msgCode === 0) {
-                    bot.sendMessage(chatId, `✅ Bet: ${decision} ${currentBetAmt} MMK`);
-                }
+                const msg = `🧠 **AI Consensus Report**\n` +
+                            `--------------------------\n` +
+                            `📈 **Pattern:** \`${ai.currentPattern}\` detected\n` +
+                            `🗳️ **Decision:** **${ai.final}**\n` +
+                            `📊 **Confidence:** \`${ai.confidence}%\`\n` +
+                            `💡 **Logic:** _${ai.reason}_\n` +
+                            `🕒 **Issue:** ${nextIssue.slice(-5)}`;
+                
+                bot.sendMessage(chatId, msg);
             }
         }
-        await new Promise(r => setTimeout(r, 4500));
+        await new Promise(r => setTimeout(r, data.typeId === 30 ? 3000 : 8000));
     }
 }
 
+// --- 📱 Interface Handlers ---
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
-    const text = msg.text;
-    
-    if (!user_db[chatId]) {
-        user_db[chatId] = { 
-            running: false, 
-            sessionProfit: 0, 
-            step: 0, 
-            betPlan: [10, 30, 90, 270, 830], 
-            formula: "SMART", 
-            typeId: 30 
-        };
+    if (!user_db[chatId]) user_db[chatId] = { running: false, historyLogs: [] };
+
+    if (msg.text === '/start') {
+        return bot.sendMessage(chatId, "🤖 **WinGo Pattern AI**\nဖုန်းနံပါတ် (09...) ပေးပါ:");
     }
 
-    const menu = { 
-        reply_markup: { 
-            keyboard: [["🚀 Start Auto", "🛑 Stop Auto"], ["💰 My Profile", "⚙️ Setup"], ["/start"]], 
-            resize_keyboard: true 
-        } 
-    };
-
-    if (text === '/start') {
-        return bot.sendMessage(chatId, 
-            "🤖 **BigWin Pro Console v7.5**\n\n" +
-            "ဖုန်းနံပါတ်ပို့ပါ:", 
-            { reply_markup: { remove_keyboard: true } }
-        );
-    }
-
-    if (text === "💰 My Profile") {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
-        const info = await callApi("GetUserInfo", {}, user_db[chatId].token);
-        if (info?.msgCode === 0) {
-            return bot.sendMessage(chatId, `👤 ID: ${info.data.userId}\n💵 Balance: ${info.data.amount} ကျပ်`);
-        }
-        return bot.sendMessage(chatId, "❌ Balance မရပါ။");
-    }
-
-    if (text === "⚙️ Setup") {
-        const setKB = { 
-            reply_markup: { 
-                inline_keyboard: [
-                    [{ text: "🧬 Formula: " + user_db[chatId].formula, callback_data: "cycle" }],
-                    [{ text: "🕒 Mode: " + (user_db[chatId].typeId === 30 ? "30s" : "1min"), callback_data: "mode" }]
-                ]
-            }
-        };
-        return bot.sendMessage(chatId, "⚙️ Settings", setKB);
-    }
-
-    if (text === "🚀 Start Auto") {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
-        if (user_db[chatId].running) return bot.sendMessage(chatId, "⚠️ Bot running!");
-        
+    if (msg.text === "🚀 Start 30s" || msg.text === "🚀 Start 1min") {
+        user_db[chatId].typeId = msg.text.includes("30s") ? 30 : 1;
         user_db[chatId].running = true;
-        user_db[chatId].sessionProfit = 0;
-        user_db[chatId].step = 0;
-        user_db[chatId].last_issue = "";
-        user_db[chatId].last_pred = null;
         monitoringLoop(chatId);
-        return bot.sendMessage(chatId, "🚀 **Auto-Betting Started!**", menu);
+        return bot.sendMessage(chatId, `🚀 AI Monitoring (${user_db[chatId].typeId === 30 ? '30s' : '1m'}) စတင်ပါပြီ...`);
     }
 
-    if (text === "🛑 Stop Auto") {
+    if (msg.text === "📊 View History") {
+        const historyText = user_db[chatId].historyLogs.length > 0 ? user_db[chatId].historyLogs.join("\n") : "မှတ်တမ်းမရှိသေးပါ။";
+        return bot.sendMessage(chatId, `📊 **Last 10 Results:**\n${historyText}`);
+    }
+
+    if (msg.text === "🛑 Stop") {
         user_db[chatId].running = false;
-        return bot.sendMessage(chatId, "🛑 Stopped", menu);
+        return bot.sendMessage(chatId, "🛑 AI ရပ်တန့်လိုက်ပါပြီ။");
     }
 
-    if (text.startsWith("plan ")) {
-        user_db[chatId].betPlan = text.replace("plan ", "").split(",").map(Number);
-        return bot.sendMessage(chatId, "✅ Plan updated");
+    // Login logic (Standard)
+    if (/^\d{9,11}$/.test(msg.text) && !user_db[chatId].token) {
+        user_db[chatId].tempPhone = msg.text;
+        return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
     }
-
-    // ========== LOGIN - EXACTLY AS YOUR PAYLOAD ==========
-    if (!user_db[chatId].token && !user_db[chatId].awaitingPassword) {
-        user_db[chatId].tempPhone = text;
-        user_db[chatId].awaitingPassword = true;
-        return bot.sendMessage(chatId, "🔐 Password ပို့ပါ:");
-    }
-    
-    if (user_db[chatId].awaitingPassword && !user_db[chatId].token) {
-        const phone = user_db[chatId].tempPhone;
-        
-        // ✅ ခင်ဗျား payload အတိုင်း အတိအကျ
-        const loginPayload = {
-            username: "959696740902",     // Fixed username
-            pwd: "kyawhtetaung778",       // Fixed password
-            phonetype: 1,
-            logintype: "mobile",
-            packId: "",
-            deviceId: FIXED_DEVICE_ID,    // Fixed deviceId
-            language: 7
-        };
-        
-        console.log("📱 Login Payload:", JSON.stringify(loginPayload));
-        
-        const res = await callApi("Login", loginPayload);
-        
-        console.log("📡 Response:", JSON.stringify(res));
-        
+    if (user_db[chatId].tempPhone && !user_db[chatId].token) {
+        const res = await callApi("Login", { phonetype: -1, language: 7, logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: msg.text });
         if (res?.msgCode === 0) {
             user_db[chatId].token = res.data.tokenHeader + res.data.token;
-            delete user_db[chatId].tempPhone;
-            delete user_db[chatId].awaitingPassword;
-            return bot.sendMessage(chatId, "✅ **Login Success!**\n\n🚀 Start Auto နှိပ်ပါ။", menu);
-        } else {
-            delete user_db[chatId].tempPhone;
-            delete user_db[chatId].awaitingPassword;
-            return bot.sendMessage(chatId, 
-                "❌ **Login Failed!**\n\n" +
-                "Error: `" + (res?.msg || res?.msgCode || "Unknown") + "`\n\n" +
-                "Payload အတိုင်း ထည့်ထားပါတယ်။\n" +
-                "Website မှာ ဝင်ကြည့်ပါ။\n\n" +
-                "/start ပြန်လုပ်ပါ။"
-            );
+            const menu = { reply_markup: { keyboard: [["🚀 Start 30s", "🚀 Start 1min"], ["📊 View History", "🛑 Stop"]], resize_keyboard: true } };
+            return bot.sendMessage(chatId, "✅ Login Success! Mode ရွေးချယ်ပါ။", menu);
         }
     }
 });
-
-bot.on('callback_query', (q) => {
-    const chatId = q.message.chat.id;
-    if (q.data === "cycle") {
-        const f = ["SMART", "FOLLOW", "OPPOSITE", "RANDOM"];
-        user_db[chatId].formula = f[(f.indexOf(user_db[chatId].formula) + 1) % f.length];
-    } else if (q.data === "mode") {
-        user_db[chatId].typeId = user_db[chatId].typeId === 30 ? 1 : 30;
-    }
-    bot.answerCallbackQuery(q.id);
-    bot.sendMessage(chatId, "🔄 Updated");
-});
-
-console.log('🤖 Bot Started - Using EXACT payload from your website!');
-console.log('📱 Username: 959696740902');
-console.log('🔐 DeviceId: 36ff1811c56f8853613b532fe47307d8');
