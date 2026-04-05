@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo v59: Stability Patch Active'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v60: 3-History Fixed'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -32,39 +32,46 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// --- 🧠 10-Brains Logic (Fixed NaN Issue) ---
+// --- 🧠 AI Logic ---
 function getAIVote(history) {
     const results = history.slice(0, 20).map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
     const currentPattern = results.slice(0, 3).reverse().join("-");
-    let votes = { B: 1, S: 1, brainDetails: [] }; // 1 ကနေ စထားခြင်းဖြင့် NaN ကို ကာကွယ်သည်
+    let votes = { B: 1, S: 1, brainDetails: [] };
 
     if (currentPattern === "Big-Small-Big") { votes.S += 5; votes.brainDetails.push("🧠 B1-3: Mirror (Small)"); }
     else if (currentPattern === "Small-Big-Small") { votes.B += 5; votes.brainDetails.push("🧠 B1-3: Mirror (Big)"); }
     else { votes.brainDetails.push("🧠 B1-3: Pattern Analysis"); }
 
     const finalSide = votes.B > votes.S ? "Big" : "Small";
-    const totalVotes = votes.B + votes.S;
-    const confidence = Math.round((Math.max(votes.B, votes.S) / totalVotes) * 100);
-    
+    const confidence = Math.round((Math.max(votes.B, votes.S) / (votes.B + votes.S)) * 100);
     return { finalSide, confidence, currentPattern, brainSummary: votes.brainDetails.join("\n") };
 }
 
-// --- 🚀 Monitoring Loop ---
+// --- 🚀 Monitoring Loop (History Updates) ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: data.typeId }, data.token);
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, data.token);
 
         if (res && res.msgCode === 0 && res.data?.list?.length > 0) {
             const history = res.data.list;
             if (history[0].issueNumber !== data.last_issue) {
                 const realSide = parseInt(history[0].number) >= 5 ? "Big" : "Small";
 
+                // 📈 AI History Update
                 if (data.last_pred) {
                     const isWin = data.last_pred === realSide;
+                    data.aiPredictionLogs.unshift({ status: isWin ? "✅" : "❌", issue: history[0].issueNumber.slice(-3), pred: data.last_pred });
                     if (!isWin) data.currentMultiplier *= 3; else data.currentMultiplier = 1;
-                    bot.sendMessage(chatId, `✉️ **နိုင်/ရှုံး ရလဒ်**\n------------------\n📅 ပွဲစဉ်: \`${history[0].issueNumber.slice(-5)}\` \n🎲 ထွက်: \`${history[0].number} (${realSide})\` \n📊 ရလဒ်: **${isWin ? "✅ WIN" : "❌ LOSS"}**\n🔄 အဆင့်: ${data.currentMultiplier}X`);
                 }
+
+                // 📜 Betting History Update
+                data.betHistory.forEach(bet => {
+                    if (bet.issue === history[0].issueNumber.slice(-5) && bet.status === "⏳ Pending") {
+                        bet.status = bet.side === realSide ? "✅ WIN" : "❌ LOSS";
+                        bot.sendMessage(chatId, `✉️ **နိုင်/ရှုံး ရလဒ်**\n📅 ပွဲစဉ်: \`${bet.issue}\` \n📊 ရလဒ်: **${bet.status}**`);
+                    }
+                });
 
                 const ai = getAIVote(history);
                 data.last_issue = history[0].issueNumber;
@@ -78,83 +85,86 @@ async function monitoringLoop(chatId) {
                 });
             }
         }
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 4000));
     }
 }
 
-// --- 📱 UI & Menu Handlers ---
+// --- 📱 UI Handlers ---
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     if (!user_db[chatId]) user_db[chatId] = { running: false, aiPredictionLogs: [], betHistory: [], currentMultiplier: 1 };
 
     const menu = { reply_markup: { keyboard: [
         ["🚀 ၃၀ စက္ကန့် စတင်ရန်", "🛑 AI ရပ်ရန်"],
-        ["💰 လက်ကျန်ငွေကြည့်မည်", "🚪 Logout ထွက်မည်"],
-        ["📊 Website Result", "📜 Betting History"]
+        ["💰 လက်ကျန်ငွေကြည့်မည်", "📊 Website Result"],
+        ["📈 AI History", "📜 Betting History"],
+        ["🗑️ မှတ်တမ်းဖျက်မည်", "🚪 Logout ထွက်မည်"]
     ], resize_keyboard: true } };
 
-    if (msg.text === '/start') return bot.sendMessage(chatId, "🤖 WinGo Master v59 (Stable)\nဖုန်းနံပါတ် ပေးပါ:", menu);
+    if (msg.text === '/start') return bot.sendMessage(chatId, "🤖 WinGo Master v60\nဖုန်းနံပါတ် ပေးပါ:", menu);
 
-    // လက်ကျန်ငွေကြည့်ရန် (Fix: Token စစ်ဆေးခြင်း)
+    // 1. 📊 Website Result (Fixed)
+    if (msg.text === "📊 Website Result") {
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, typeId: 30 }, user_db[chatId].token);
+        let txt = "📊 **နောက်ဆုံး Website ရလဒ် ၁၀ ခု**\n------------------\n";
+        res?.data?.list?.forEach(i => { txt += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number) >= 5 ? "ကြီး" : "သေး"})\n`; });
+        return bot.sendMessage(chatId, txt || "ဒေတာဆွဲမရပါ။");
+    }
+
+    // 2. 📈 AI History (Fixed)
+    if (msg.text === "📈 AI History") {
+        let txt = "📈 **AI ခန့်မှန်းချက် မှတ်တမ်း**\n------------------\n";
+        user_db[chatId].aiPredictionLogs.slice(0, 10).forEach(l => { txt += `${l.status} ပွဲ: ${l.issue} | ခန့်မှန်း: ${l.pred}\n`; });
+        return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိသေးပါ။");
+    }
+
+    // 3. 📜 Betting History (Fixed)
+    if (msg.text === "📜 Betting History") {
+        let txt = "📜 **ငွေစာရင်း ထိုးခဲ့သည့်မှတ်တမ်း**\n------------------\n";
+        user_db[chatId].betHistory.slice(0, 10).forEach(h => {
+            txt += `🔹 ပွဲ: ${h.issue} | ${h.status}\n💰 ${h.amount} MMK (${h.mult}X)\n\n`;
+        });
+        return bot.sendMessage(chatId, txt || "ထိုးထားသည့်မှတ်တမ်း မရှိပါ။");
+    }
+
+    // Money Check
     if (msg.text === "💰 လက်ကျန်ငွေကြည့်မည်") {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
         const res = await callApi("GetUserInfo", {}, user_db[chatId].token);
-        if (res?.msgCode === 0) {
-            bot.sendMessage(chatId, `💰 **လက်ကျန်ငွေ**\n------------------\n💵 လက်ကျန်: **${res.data.amount} MMK**`);
-        }
+        if (res?.msgCode === 0) bot.sendMessage(chatId, `💰 **လက်ကျန်ငွေ:** ${res.data.amount} MMK`);
     }
 
-    // Logout
-    if (msg.text === "🚪 Logout ထွက်မည်") {
-        user_db[chatId] = { running: false, aiPredictionLogs: [], betHistory: [], currentMultiplier: 1 };
-        return bot.sendMessage(chatId, "✅ Logout အောင်မြင်သည်။", { reply_markup: { remove_keyboard: true } });
-    }
-
-    // Login Logic (Fix: Double check phone format)
+    // Login logic
     if (/^\d{9,11}$/.test(msg.text) && !user_db[chatId].token) {
-        user_db[chatId].tempPhone = msg.text; 
-        return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
+        user_db[chatId].tempPhone = msg.text; return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
     }
-    
-    if (user_db[chatId].tempPhone && !user_db[chatId].token && msg.text.length > 5) {
+    if (user_db[chatId].tempPhone && !user_db[chatId].token) {
         const res = await callApi("Login", { phonetype: -1, logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: msg.text });
         if (res?.msgCode === 0) {
             user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
-            user_db[chatId].tempPhone = null;
-            bot.sendMessage(chatId, "✅ Login အောင်မြင်သည်။ စတင်နိုင်ပါပြီ။", menu);
-        } else {
-            bot.sendMessage(chatId, "❌ Login မှားယွင်းနေပါသည်။ ဖုန်းနံပါတ် ပြန်ပို့ပေးပါ။");
-            user_db[chatId].tempPhone = null;
+            bot.sendMessage(chatId, "✅ Login အောင်မြင်သည်။", menu);
         }
     }
 
     if (msg.text?.includes("စတင်ရန်")) {
-        if (!user_db[chatId].token) return bot.sendMessage(chatId, "❌ Login အရင်ဝင်ပါ။");
-        user_db[chatId].typeId = 30; user_db[chatId].running = true;
-        monitoringLoop(chatId); bot.sendMessage(chatId, "🚀 Monitoring စတင်ပါပြီ။", menu);
+        user_db[chatId].running = true; monitoringLoop(chatId);
+        bot.sendMessage(chatId, "🚀 AI စတင်ပါပြီ။", menu);
     }
-    
     if (msg.text === "🛑 AI ရပ်ရန်") { user_db[chatId].running = false; bot.sendMessage(chatId, "🛑 ရပ်လိုက်ပါပြီ။"); }
 
-    // Betting (Fix: Ensure nextIssue is present)
+    // Betting Logic (Re-fixed)
     if (user_db[chatId]?.pendingSide && /^\d+$/.test(msg.text)) {
-        const side = user_db[chatId].pendingSide;
         const amount = parseInt(msg.text);
-        const betPayload = { typeId: 30, issuenumber: user_db[chatId].nextIssue, gameType: 2, amount: 10, betCount: Math.floor(amount / 10), selectType: side === "Big" ? 13 : 14, isAgree: true };
+        const betPayload = { typeId: 30, issuenumber: user_db[chatId].nextIssue, gameType: 2, amount: 10, betCount: Math.floor(amount / 10), selectType: user_db[chatId].pendingSide === "Big" ? 13 : 14, isAgree: true };
         const res = await callApi("GameBetting", betPayload, user_db[chatId].token);
         if (res?.msgCode === 0) {
             bot.sendMessage(chatId, `✅ ထိုးပြီးပါပြီ: ${amount} MMK`);
-            user_db[chatId].betHistory.unshift({ issue: user_db[chatId].nextIssue.slice(-5), side, amount, status: "⏳ Pending", mult: user_db[chatId].currentMultiplier });
-        } else {
-            bot.sendMessage(chatId, `❌ ထိုးမရပါ: ${res?.msg || "ပွဲစဉ်ကျော်သွားခြင်း (သို့) လက်ကျန်ငွေမလောက်ခြင်း"}`);
+            user_db[chatId].betHistory.unshift({ issue: user_db[chatId].nextIssue.slice(-5), side: user_db[chatId].pendingSide, amount, status: "⏳ Pending", mult: user_db[chatId].currentMultiplier });
         }
         user_db[chatId].pendingSide = null;
     }
 });
 
 bot.on('callback_query', (query) => {
-    const chatId = query.message.chat.id;
-    if (!user_db[chatId].token) return bot.answerCallbackQuery(query.id, { text: "Login အရင်ဝင်ပါ" });
-    user_db[chatId].pendingSide = query.data.split('_')[1];
-    bot.sendMessage(chatId, `💰 **${user_db[chatId].pendingSide}** အတွက် ငွေပမာဏ ရိုက်ထည့်ပါ:`);
+    user_db[query.message.chat.id].pendingSide = query.data.split('_')[1];
+    bot.sendMessage(query.message.chat.id, `💰 **${user_db[query.message.chat.id].pendingSide}** အတွက် ငွေပမာဏ ရိုက်ထည့်ပါ:`);
 });
