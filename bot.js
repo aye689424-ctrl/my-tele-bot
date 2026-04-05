@@ -3,7 +3,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo v33: 402 Code Bypass'); }).listen(process.env.PORT || 8080);
+// Render Alive Fix
+http.createServer((req, res) => { res.end('WinGo v34: Fully Active'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -11,7 +12,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// Java Logic: _randomKey
+// --- 🛡️ Security Logic (From Java Source) ---
 function generateRandomKey() {
     let template = "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx";
     return template.replace(/[xy]/g, (c) => {
@@ -21,7 +22,6 @@ function generateRandomKey() {
     });
 }
 
-// Java Logic: _signMd5 (Space-less, Sorted)
 function signMd5(payload) {
     const { signature, timestamp, ...rest } = payload;
     const sortedKeys = Object.keys(rest).sort();
@@ -53,15 +53,13 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// 🎰 Betting Logic (Revised for 402 & Amount Logic)
+// --- 🎰 Betting Handler (402 & Logic Fix) ---
 async function handleBetting(chatId, side, totalAmount) {
     const data = user_db[chatId];
     if (!data.nextIssue) return bot.sendMessage(chatId, "❌ ပွဲစဉ်နံပါတ် ရှာမတွေ့သေးပါ။");
 
-    // Java code: amount logic အတိအကျ
-    // ၁၀၀၀၀ အောက်ဆိုလျှင် ၁၀ ကျပ်တန်၊ အထက်ဆိုလျှင် ၁၀ ရဲ့ ထပ်ကိန်းများဖြင့် တွက်ချက်သည်
     let baseUnit = totalAmount < 10000 ? 10 : Math.pow(10, Math.floor(Math.log10(totalAmount)) - 2);
-    if (baseUnit < 10) baseUnit = 10; // အနည်းဆုံး ၁၀ ကျပ်
+    if (baseUnit < 10) baseUnit = 10;
 
     const betPayload = {
         typeId: 30,
@@ -76,15 +74,73 @@ async function handleBetting(chatId, side, totalAmount) {
 
     const res = await callApi("GameBetting", betPayload, data.token);
     
-    // msgCode က 0 ဖြစ်စေ၊ 402 ဖြစ်စေ (Bet Success လို့ပြလျှင်) အောင်မြင်သည်ဟု သတ်မှတ်မည်
     if (res && (res.msgCode === 0 || res.msg === "Bet success")) {
         bot.sendMessage(chatId, `✅ **${side}** မှာ **${totalAmount}** MMK ထိုးပြီးပါပြီ။`);
     } else {
-        const detail = res ? JSON.stringify(res) : "Network Error";
-        bot.sendMessage(chatId, `❌ **ထိုးမရပါ။**\nအကြောင်းရင်း: \`${detail}\``);
+        bot.sendMessage(chatId, `❌ **ထိုးမရပါ။**\nအကြောင်းရင်း: \`${res ? res.message : "Network Error"}\``);
     }
 }
 
-// 🚀 Monitoring Loop & Other Handlers (v32 အတိုင်း)
-// ... (MonitoringLoop, bot.on('message'), bot.on('callback_query'))
-// (အပေါ်က v32 ကုဒ်မှ အပိုင်းများကို ဤနေရာတွင် အစားထိုးသုံးနိုင်သည်)
+// --- 🚀 Monitoring Loop (စာတက်လာစေမည့်အပိုင်း) ---
+async function monitoringLoop(chatId) {
+    while (user_db[chatId]?.running) {
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 10, typeId: 30 }, user_db[chatId].token);
+        if (res && res.msgCode === 0 && res.data?.list?.length > 0) {
+            const lastRound = res.data.list[0];
+            if (lastRound.issueNumber !== user_db[chatId].last_issue) {
+                user_db[chatId].last_issue = lastRound.issueNumber;
+                user_db[chatId].nextIssue = (BigInt(lastRound.issueNumber) + 1n).toString();
+                
+                bot.sendMessage(chatId, `🔔 **၃၀ စက္ကန့် ပွဲစဉ်သစ်: ${user_db[chatId].nextIssue.slice(-5)}**\nဘယ်ဘက်ကို ထိုးမလဲ ရွေးပေးပါ-`, {
+                    reply_markup: { 
+                        inline_keyboard: [[
+                            { text: "🔵 Big (အကြီး)", callback_data: "bet_Big" },
+                            { text: "🔴 Small (အသေး)", callback_data: "bet_Small" }
+                        ]]
+                    }
+                });
+            }
+        }
+        await new Promise(r => setTimeout(r, 3500));
+    }
+}
+
+// --- 📱 Message Handlers ---
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    if (!user_db[chatId]) user_db[chatId] = { running: false };
+
+    if (msg.text === '/start') {
+        user_db[chatId] = { running: false, token: null };
+        return bot.sendMessage(chatId, "🤖 **WinGo Master v34**\nဖုန်းနံပါတ် ပို့ပေးပါ:");
+    }
+
+    if (/^\d{9,11}$/.test(msg.text) && !user_db[chatId].token) {
+        user_db[chatId].tempPhone = msg.text;
+        return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
+    }
+
+    if (user_db[chatId].tempPhone && !user_db[chatId].token) {
+        const res = await callApi("Login", { phonetype: -1, logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: msg.text });
+        if (res && res.msgCode === 0) {
+            user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
+            user_db[chatId].running = true;
+            monitoringLoop(chatId);
+            bot.sendMessage(chatId, `✅ Login ရပါပြီ။ ၃၀ စက္ကန့်ပွဲစဉ်များကို စောင့်ကြည့်နေပါသည်။`);
+        } else {
+            bot.sendMessage(chatId, "❌ Login မှားယွင်းသည်။");
+            user_db[chatId].tempPhone = null;
+        }
+    }
+
+    if (user_db[chatId]?.pendingSide && /^\d+$/.test(msg.text)) {
+        await handleBetting(chatId, user_db[chatId].pendingSide, parseInt(msg.text));
+        user_db[chatId].pendingSide = null;
+    }
+});
+
+bot.on('callback_query', (query) => {
+    const chatId = query.message.chat.id;
+    user_db[chatId].pendingSide = query.data.split('_')[1];
+    bot.sendMessage(chatId, `💰 **${user_db[chatId].pendingSide}** အတွက် ထိုးမည့်ပမာဏ ရိုက်ထည့်ပါ:`);
+});
