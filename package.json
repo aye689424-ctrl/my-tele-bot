@@ -1,12 +1,14 @@
 {
-  "name": "bigwin-pro-bot",
-  "version": "6.2.0",
+  "name": "wingo-ai-bot",
+  "version": "1.0.0",
+  "description": "",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",
-    "axios": "^1.6.2"
+    "axios": "^1.6.0",
+    "crypto": "^1.0.1"
   }
 }
