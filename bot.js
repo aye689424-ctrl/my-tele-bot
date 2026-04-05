@@ -3,8 +3,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-// Render Alive
-http.createServer((req, res) => { res.end('WinGo v28: System Optimized'); }).listen(process.env.PORT || 8080);
+// Render Alive Monitoring
+http.createServer((req, res) => { res.end('WinGo Master v29.0: Active'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -12,31 +12,28 @@ const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// --- 🛡️ Precision Signature Generator ---
-function generateSignature(payload) {
-    const { signature, ...rest } = payload;
-    const sortedKeys = Object.keys(rest).sort();
-    let sortedObj = {};
-    sortedKeys.forEach(key => { sortedObj[key] = rest[key]; });
-    const jsonStr = JSON.stringify(sortedObj).replace(/\s+/g, '');
-    return crypto.createHash('md5').update(jsonStr).digest('hex').toUpperCase();
+// --- 🛡️ Signature စနစ် (သင်ပေးထားသော Logic အတိုင်း) ---
+function signMd5(data) {
+    let temp = { ...data };
+    delete temp.signature; 
+    delete temp.timestamp;
+    const sortedKeys = Object.keys(temp).sort();
+    let sortedData = {};
+    sortedKeys.forEach(key => { sortedData[key] = temp[key]; });
+    // Space အားလုံးဖယ်ပြီး MD5 ပြောင်းခြင်း
+    const jsonStr = JSON.stringify(sortedData).replace(/ /g, '');
+    return crypto.createHash('md5').update(jsonStr).digest('hex').toLowerCase();
 }
 
-async function callApi(endpoint, data, authToken = null) {
-    const payload = {
-        ...data,
-        language: 7,
-        random: crypto.randomUUID().replace(/-/g, ''),
-        timestamp: Math.floor(Date.now() / 1000)
-    };
-    payload.signature = generateSignature(payload);
+async function callApi(endpoint, payload, authToken = null) {
+    payload.random = crypto.randomUUID().replace(/-/g, '');
+    payload.timestamp = Math.floor(Date.now() / 1000);
+    payload.language = 7;
+    payload.signature = signMd5(payload).toUpperCase();
 
-    const headers = {
-        "Content-Type": "application/json;charset=UTF-8",
-        "Accept": "application/json, text/plain, */*",
+    const headers = { 
+        "Content-Type": "application/json;charset=UTF-8", 
         "Authorization": authToken || "",
-        "Origin": "https://www.777bigwingame.app",
-        "Referer": "https://www.777bigwingame.app/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     };
 
@@ -46,63 +43,80 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// --- 🎰 Betting Logic (Final Calibration) ---
-async function handleBetting(chatId, side, totalAmount) {
-    const data = user_db[chatId];
-    if (!data.nextIssue) return bot.sendMessage(chatId, "❌ ပွဲစဉ်နံပါတ် မရသေးပါ။");
+// --- 🧠 AI ဦးနှောက် Logic ---
+function getAIVote(history) {
+    const results = history.slice(0, 20).map(i => (parseInt(i.number) >= 5 ? "ကြီး" : "သေး"));
+    const currentPattern = results.slice(0, 3).reverse().join("-");
+    let votes = { B: 0, S: 0 };
 
-    const betPayload = {
-        typeId: data.typeId || 30,
-        issuenumber: data.nextIssue,
-        amount: 10, // ပုံထဲကအတိုင်း 10 ကျပ်တန် Base
-        betCount: Math.floor(totalAmount / 10), // ဥပမာ ၁၀၀ ဖိုးဆိုရင် ၁၀ ဆ
-        gameType: 2,
-        selectType: side === "Big" ? 13 : 14,
-        isAgree: true // ✅ Website Agreement Fix
-    };
-
-    const res = await callApi("GameBetting", betPayload, data.token);
-    
-    if (res && res.msgCode === 0) {
-        bot.sendMessage(chatId, `✅ **${side === "Big" ? "အကြီး" : "အသေး"}** မှာ **${totalAmount}** MMK တကယ်ထိုးပြီးပါပြီ!`);
+    if (currentPattern === "ကြီး-သေး-ကြီး") votes.S += 4;
+    else if (currentPattern === "သေး-ကြီး-သေး") votes.B += 4;
+    else if (results[0] === results[1] && results[1] === results[2]) {
+        votes[results[0] === "ကြီး" ? "B" : "S"] += 3;
     } else {
-        const errMsg = res ? (res.message || "Error") : "Server Error";
-        bot.sendMessage(chatId, `❌ **ထိုးမရပါ။**\nအကြောင်းရင်း: \`${errMsg}\``);
+        votes[results[0] === "ကြီး" ? "S" : "B"] += 2;
     }
+
+    const final = votes.B > votes.S ? "ကြီး (Big)" : "သေး (Small)";
+    const confidence = Math.round((Math.max(votes.B, votes.S) / (votes.B + votes.S)) * 100);
+    return { final, confidence, currentPattern };
 }
 
-// --- 🚀 Monitoring Loop ---
+// --- 🚀 AI စောင့်ကြည့်ရေး စနစ် ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: user_db[chatId].typeId }, user_db[chatId].token);
+        const data = user_db[chatId];
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: data.typeId }, data.token);
+
         if (res && res.msgCode === 0 && res.data?.list?.length > 0) {
-            const lastRound = res.data.list[0];
-            if (lastRound.issueNumber !== user_db[chatId].last_issue) {
-                user_db[chatId].last_issue = lastRound.issueNumber;
-                user_db[chatId].nextIssue = (BigInt(lastRound.issueNumber) + 1n).toString();
+            const history = res.data.list;
+            const currIssue = history[0].issueNumber;
+
+            if (currIssue !== data.last_issue) {
+                const ai = getAIVote(history);
+                const nextIssue = (BigInt(currIssue) + 1n).toString();
+                data.last_issue = currIssue;
+                data.nextIssue = nextIssue;
+
+                const msg = `🧠 **AI ဆုံးဖြတ်ချက် အစီရင်ခံစာ**\n--------------------------\n📈 ပုံစံ: \`${ai.currentPattern}\` \n🗳️ ခန့်မှန်းချက်: **${ai.final}**\n📊 ယုံကြည်မှု: \`${ai.confidence}%\`\n🕒 ပွဲစဉ်: ${nextIssue.slice(-5)}`;
                 
-                // AI Choice (ကြီးထွက်ရင် သေးထိုး၊ သေးထွက်ရင် ကြီးထိုး - Reverse Pattern)
-                const aiPick = parseInt(lastRound.number) >= 5 ? "သေး (Small)" : "ကြီး (Big)";
-                
-                bot.sendMessage(chatId, `🧠 **AI ဆုံးဖြတ်ချက်**\n---\n🗳️ ခန့်မှန်းချက်: **${aiPick}**\n🕒 ပွဲစဉ်: ${user_db[chatId].nextIssue.slice(-5)}`, {
-                    reply_markup: { inline_keyboard: [[{text: "🔵 Big ကိုထိုးမည်", callback_data: "bet_Big"}, {text: "🔴 Small ကိုထိုးမည်", callback_data: "bet_Small"}]] }
+                bot.sendMessage(chatId, msg, { 
+                    reply_markup: { inline_keyboard: [[{text: "🔵 Big ထိုးမည်", callback_data: "bet_Big"}, {text: "🔴 Small ထိုးမည်", callback_data: "bet_Small"}]] }
                 });
             }
         }
-        await new Promise(r => setTimeout(r, 4500));
+        await new Promise(r => setTimeout(r, 4000));
     }
 }
 
-// --- 📱 Interaction Events ---
+// --- 🎰 Betting Logic (Final Fix) ---
+async function handleBetting(chatId, side, amount) {
+    const data = user_db[chatId];
+    const betPayload = {
+        typeId: data.typeId || 30,
+        issuenumber: data.nextIssue,
+        amount: 10, 
+        betCount: Math.floor(amount / 10),
+        gameType: 2,
+        selectType: side === "Big" ? 13 : 14,
+        isAgree: true // ✅ ပုံထဲက Checkbox အမှန်ခြစ်
+    };
+
+    const res = await callApi("GameBetting", betPayload, data.token);
+    if (res && res.msgCode === 0) {
+        bot.sendMessage(chatId, `✅ **${side}** မှာ **${amount}** အောင်မြင်စွာ ထိုးပြီးပါပြီ!`);
+    } else {
+        bot.sendMessage(chatId, `❌ ထိုးမရပါ။ အကြောင်းရင်း: ${res?.message || "Error"}`);
+    }
+}
+
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     if (!user_db[chatId]) user_db[chatId] = { running: false };
 
-    if (msg.text === '/start') {
-        user_db[chatId] = { running: false };
-        return bot.sendMessage(chatId, "🤖 WinGo Master v28\nဖုန်းနံပါတ် (09...) ပို့ပေးပါ:");
-    }
+    if (msg.text === '/start') return bot.sendMessage(chatId, "🤖 WinGo Master AI\nဖုန်းနံပါတ် (09...) ပို့ပေးပါ:");
 
+    // Login Flow
     if (/^\d{9,11}$/.test(msg.text) && !user_db[chatId].token) {
         user_db[chatId].tempPhone = msg.text;
         return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
@@ -111,22 +125,22 @@ bot.on('message', async (msg) => {
     if (user_db[chatId].tempPhone && !user_db[chatId].token) {
         const res = await callApi("Login", { phonetype: -1, logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: msg.text });
         if (res && res.msgCode === 0) {
-            user_db[chatId].token = (res.data.tokenHeader || "Bearer") + " " + res.data.token;
-            bot.sendMessage(chatId, `✅ Login အောင်မြင်သည်။ လက်ကျန်: ${res.data.amount || res.data.money} MMK`, { 
+            // ✅ Fix: Space ထည့်လိုက်ပါပြီ (Bearer + Space + Token)
+            user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
+            return bot.sendMessage(chatId, "✅ လော့ဂ်အင် အောင်မြင်သည်။", { 
                 reply_markup: { keyboard: [["🚀 ၃၀ စက္ကန့် စတင်ရန်"]], resize_keyboard: true } 
             });
         } else {
-            bot.sendMessage(chatId, "❌ Login မှားယွင်းပါသည်။ ဖုန်းနံပါတ် ပြန်ပို့ပါ။");
+            bot.sendMessage(chatId, "❌ Login မှားယွင်းနေပါသည်။ ဖုန်းနံပါတ် ပြန်ပို့ပေးပါ။");
             user_db[chatId].tempPhone = null;
         }
         return;
     }
 
-    if (msg.text === "🚀 ၃၀ စက္ကန့် စတင်ရန်" && user_db[chatId].token) {
+    if (msg.text === "🚀 ၃၀ စက္ကန့် စတင်ရန်") {
         user_db[chatId].typeId = 30;
         user_db[chatId].running = true;
         monitoringLoop(chatId);
-        bot.sendMessage(chatId, "🚀 AI ကို စတင်လိုက်ပါပြီ။ ပွဲစဉ်မှတ်တမ်းများကို စောင့်ကြည့်နေပါသည်။");
     }
 
     if (user_db[chatId]?.pendingSide && /^\d+$/.test(msg.text)) {
@@ -138,5 +152,5 @@ bot.on('message', async (msg) => {
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     user_db[chatId].pendingSide = query.data.split('_')[1];
-    bot.sendMessage(chatId, `🏦 **${user_db[chatId].pendingSide}** အတွက် ပမာဏရိုက်ထည့်ပါ (အနည်းဆုံး ၁၀ ကျပ်):`);
+    bot.sendMessage(chatId, `🏦 **${user_db[chatId].pendingSide}** အတွက် ပမာဏရိုက်ထည့်ပါ:`);
 });
