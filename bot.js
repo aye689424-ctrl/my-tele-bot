@@ -3,8 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-// Render Alive Server
-http.createServer((req, res) => { res.end('WinGo Bot System: Running'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Bot System: Online'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -12,22 +11,29 @@ const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// --- 🛡️ API Core Logic (Signature Fixed) ---
-function signMd5(data) {
-    let temp = { ...data };
-    delete temp.signature; delete temp.timestamp;
-    const sortedKeys = Object.keys(temp).sort();
-    let sortedData = {};
-    sortedKeys.forEach(key => { sortedData[key] = temp[key]; });
-    const jsonStr = JSON.stringify(sortedData).replace(/ /g, '');
-    return crypto.createHash('md5').update(jsonStr).digest('hex').toLowerCase();
+// --- 🛡️ Signature Generator (Sorted and Cleaned) ---
+function generateSignature(payload) {
+    const sortedKeys = Object.keys(payload).sort();
+    let signStr = "";
+    sortedKeys.forEach(key => {
+        if (key !== "signature" && key !== "timestamp") {
+            signStr += `${key}=${payload[key]}&`;
+        }
+    });
+    // နောက်ဆုံး & ကို ဖြတ်ပြီး MD5 ပြောင်းခြင်း
+    signStr = signStr.slice(0, -1); 
+    // Website က တောင်းဆိုတဲ့ MD5 ပုံစံ (အချို့ site များတွင် salt လိုတတ်သော်လည်း user payload အရ တိုက်ရိုက် MD5 သုံးထားသည်)
+    return crypto.createHash('md5').update(JSON.stringify(payload).replace(/ /g, '')).digest('hex').toUpperCase();
 }
 
-async function callApi(endpoint, payload, authToken = null) {
-    payload.language = 7;
-    payload.random = crypto.randomUUID().replace(/-/g, '');
-    payload.timestamp = Math.floor(Date.now() / 1000);
-    payload.signature = signMd5(payload).toUpperCase();
+async function callApi(endpoint, data, authToken = null) {
+    const payload = {
+        ...data,
+        language: 7,
+        random: crypto.randomUUID().replace(/-/g, ''),
+        timestamp: Math.floor(Date.now() / 1000)
+    };
+    payload.signature = generateSignature(payload);
 
     const headers = {
         "Content-Type": "application/json;charset=UTF-8",
@@ -39,25 +45,24 @@ async function callApi(endpoint, payload, authToken = null) {
 
     try {
         const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 15000 });
+        console.log(`[API LOG] ${endpoint}:`, res.data); // Error ရှာရန် Log ထုတ်ခြင်း
         return res.data;
-    } catch (e) { return null; }
-}
-
-// --- 💰 Balance Check (Fixed) ---
-async function getBalance(chatId) {
-    // API အားလုံးကို စုံအောင်စစ်မည်
-    const endpoints = ["GetUserInfo", "GetBalance"];
-    for (let ep of endpoints) {
-        const res = await callApi(ep, {}, user_db[chatId].token);
-        if (res && res.msgCode === 0) {
-            // Website အလိုက် amount သို့မဟုတ် money သုံးတတ်သည်
-            return parseFloat(res.data.amount || res.data.money || 0);
-        }
+    } catch (e) {
+        console.error(`[ERR] ${endpoint}:`, e.message);
+        return null;
     }
-    return 0;
 }
 
-// --- 🧠 AI Analysis ---
+// --- 💰 Balance Check ---
+async function getBalance(chatId) {
+    const res = await callApi("GetBalance", {}, user_db[chatId].token);
+    if (res && res.msgCode === 0) {
+        return parseFloat(res.data.amount || res.data.money || 0);
+    }
+    return "N/A";
+}
+
+// --- 🧠 AI Core (အရင်အတိုင်း) ---
 function getAIVote(history) {
     const results = history.slice(0, 20).map(i => (parseInt(i.number) >= 5 ? "ကြီး" : "သေး"));
     const currentPattern = results.slice(0, 3).reverse().join("-");
@@ -70,7 +75,7 @@ function getAIVote(history) {
     return { final, confidence, currentPattern };
 }
 
-// --- 🚀 Monitoring Loop ---
+// --- 🚀 Auto Monitoring Loop ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
@@ -112,13 +117,13 @@ async function monitoringLoop(chatId) {
     }
 }
 
-// --- 📱 Betting Action ---
+// --- 📱 Interaction & Betting ---
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const side = query.data.split('_')[1];
     const balance = await getBalance(chatId);
     user_db[chatId].pendingSide = side;
-    bot.sendMessage(chatId, `💰 လက်ကျန်ငွေ: **${balance}** MMK\n🏦 **${side}** အတွက် ပမာဏရိုက်ထည့်ပါ (10 မှစ၍):`);
+    bot.sendMessage(chatId, `💰 လက်ကျန်ငွေ: **${balance}** MMK\n🏦 **${side === "Big" ? "အကြီး" : "အသေး"}** အတွက် ပမာဏရိုက်ထည့်ပါ:`);
 });
 
 bot.on('message', async (msg) => {
@@ -128,14 +133,7 @@ bot.on('message', async (msg) => {
     if (user_db[chatId].pendingSide && /^\d+$/.test(msg.text)) {
         const totalAmount = parseInt(msg.text);
         const side = user_db[chatId].pendingSide;
-        const balance = await getBalance(chatId);
-
-        if (totalAmount > balance) {
-            bot.sendMessage(chatId, `❌ ငွေမလုံလောက်ပါ။ (လက်ရှိ: ${balance})`);
-            user_db[chatId].pendingSide = null;
-            return;
-        }
-
+        
         const betPayload = {
             typeId: user_db[chatId].typeId || 30,
             issuenumber: user_db[chatId].nextIssue,
@@ -147,7 +145,7 @@ bot.on('message', async (msg) => {
 
         const res = await callApi("GameBetting", betPayload, user_db[chatId].token);
         if (res && res.msgCode === 0) {
-            bot.sendMessage(chatId, `✅ **${side}** မှာ **${totalAmount}** ဖိုး တကယ်ထိုးပြီးပါပြီ!`);
+            bot.sendMessage(chatId, `✅ **${side}** မှာ **${totalAmount}** ဖိုး အောင်မြင်စွာ ထိုးပြီးပါပြီ!`);
         } else {
             bot.sendMessage(chatId, `❌ ထိုးမရပါ။ အကြောင်းရင်း: ${res?.message || "Error"}`);
         }
@@ -155,7 +153,7 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    if (msg.text === '/start') return bot.sendMessage(chatId, "🤖 WinGo Master AI\nဖုန်းနံပါတ် (09...) ပို့ပေးပါ:");
+    if (msg.text === '/start') return bot.sendMessage(chatId, "🤖 WinGo AI Master\nဖုန်းနံပါတ် (09...) ပို့ပေးပါ:");
 
     if (/^\d{9,11}$/.test(msg.text) && !user_db[chatId].token) {
         user_db[chatId].tempPhone = msg.text;
@@ -165,8 +163,14 @@ bot.on('message', async (msg) => {
     if (user_db[chatId].tempPhone && !user_db[chatId].token) {
         const res = await callApi("Login", { phonetype: -1, logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: msg.text });
         if (res?.msgCode === 0) {
-            user_db[chatId].token = "Bearer " + res.data.tokenHeader + res.data.token;
-            return bot.sendMessage(chatId, "✅ Login အောင်မြင်သည်။", { reply_markup: { keyboard: [["🚀 ၃၀ စက္ကန့် စတင်ရန်", "🚀 ၁ မိနစ် စတင်ရန်"], ["🛑 AI ကို ရပ်တန့်ရန်"]], resize_keyboard: true } });
+            // Space အတိအကျ ပါဝင်သော Bearer Token
+            user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
+            const bal = await getBalance(chatId);
+            return bot.sendMessage(chatId, `✅ Login အောင်မြင်သည်။\n💰 လက်ကျန်ငွေ: ${bal} MMK`, { 
+                reply_markup: { keyboard: [["🚀 ၃၀ စက္ကန့် စတင်ရန်", "🚀 ၁ မိနစ် စတင်ရန်"], ["🛑 AI ကို ရပ်တန့်ရန်"]], resize_keyboard: true } 
+            });
+        } else {
+            return bot.sendMessage(chatId, `❌ Login ကျရှုံးသည်။ ${res?.message}`);
         }
     }
 
@@ -174,6 +178,6 @@ bot.on('message', async (msg) => {
         user_db[chatId].typeId = msg.text.includes("၃၀") ? 30 : 1;
         user_db[chatId].running = true;
         monitoringLoop(chatId);
-        bot.sendMessage(chatId, "🚀 AI စတင်ပါပြီ။");
+        bot.sendMessage(chatId, "🚀 AI ကို စတင်လိုက်ပါပြီ။ အချက်အလက်များကို စောင့်ကြည့်ပေးပါမည်။");
     }
 });
