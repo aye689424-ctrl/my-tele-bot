@@ -3,25 +3,18 @@ const axios = require("axios");
 const crypto = require('crypto');
 const http = require('http');
 
-// Render Alive
-http.createServer((req, res) => { res.end('WinGo v86: Gemini Free AI Active'); }).listen(process.env.PORT || 8080);
-
-// ====== 🛡️ CONFIG ======
-const TG_TOKEN = process.env.TG_TOKEN; 
-const GEMINI_KEY = process.env.GEMINI_KEY; // Render မှာ GEMINI_KEY လို့ နာမည်ပေးထားပါ
+// ====== 🔑 API KEYS (HARDCODED) ======
+const TG_TOKEN = "8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0";
+const GEMINI_KEY = "AIzaSyAN7Mv8Q_E9BFdTsCcr0ZSWf1N8HgB9B8I";
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
+
+// Render ပေါ်မှာ အမြဲနိုးကြားနေစေရန်
+http.createServer((req, res) => { res.end('WinGo v87: Gemini Hybrid Active'); }).listen(process.env.PORT || 8080);
 
 const bot = new TelegramBot(TG_TOKEN, { polling: true });
 let user_db = {};
 
-// --- 🛡️ API Security Logic ---
-function generateRandomKey() {
-    return "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        let r = Math.random() * 16 | 0;
-        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-    });
-}
-
+// --- 🛡️ API Security ---
 function signMd5(payload) {
     const { signature, timestamp, ...rest } = payload;
     const sortedKeys = Object.keys(rest).sort();
@@ -32,7 +25,7 @@ function signMd5(payload) {
 }
 
 async function callBigWinApi(endpoint, data, authToken = null) {
-    const payload = { ...data, language: 0, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
+    const payload = { ...data, language: 0, random: Math.random().toString(36).substring(7), timestamp: Math.floor(Date.now() / 1000) };
     payload.signature = signMd5(payload);
     const headers = { "Content-Type": "application/json;charset=UTF-8", "Authorization": authToken || "" };
     try {
@@ -41,112 +34,120 @@ async function callBigWinApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// --- 🧠 Gemini AI Prediction (FREE) ---
-async function askGemini(history) {
-    if (!GEMINI_KEY) return "⚠️ Gemini API Key မရှိသေးပါ။ Render မှာ ထည့်ပေးပါ။";
-
-    const historyData = history.slice(0, 20).map(i => `${parseInt(i.number) >= 5 ? 'Big' : 'Small'}`).join(', ');
-    const prompt = `You are a professional WinGo game analyst. Last 20 results: ${historyData}. 
-    Predict the next outcome (BIG or SMALL). Explain pattern shortly in Burmese.
-    Format your response as:
-    📚တွက်ချက်မှု: [Analysis]
-    🧠 Pattern: [Pattern Name]
-    🦸AI ခန့်မှန်းချက်: [BIG or SMALL]
-    📊 Confidence: [Percentage]%`;
-
+// --- 🧠 Gemini AI Chat & Analysis ---
+async function askGemini(prompt, isAnalysis = false) {
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
-        const res = await axios.post(url, {
-            contents: [{ parts: [{ text: prompt }] }]
-        });
+        const finalPrompt = isAnalysis ? `WinGo Game Analysis: ${prompt}. Predict next (BIG/SMALL) in Burmese.` : prompt;
+        
+        const res = await axios.post(url, { contents: [{ parts: [{ text: finalPrompt }] }] });
         return res.data.candidates[0].content.parts[0].text;
     } catch (e) {
-        return "❌ Gemini AI ချိတ်ဆက်မှု Error တက်နေပါသည်။";
+        return "❌ AI စနစ် ခေတ္တချို့ယွင်းနေပါသည်။";
     }
 }
 
-// --- 🚀 Monitoring Loop ---
-async function monitoringLoop(chatId) {
+// --- ⌨️ Custom Keyboard Menu ---
+const mainMenu = {
+    reply_markup: {
+        keyboard: [
+            ["📊 Website Results", "📈 AI History"],
+            ["🔵 Bet BIG", "🔴 Bet SMALL"],
+            ["📜 Bet Record", "🚪 Logout"]
+        ],
+        resize_keyboard: true
+    }
+};
+
+// --- 🚀 Monitoring Loop (Auto Prediction) ---
+async function startMonitoring(chatId) {
     while (user_db[chatId]?.running) {
-        const data = user_db[chatId];
-        const res = await callBigWinApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, data.token);
-        
-        if (res?.msgCode === 0 && res.data?.list?.length > 0) {
-            const history = res.data.list;
-            if (history[0].issueNumber !== data.last_issue) {
-                const realSide = parseInt(history[0].number) >= 5 ? "Big" : "Small";
+        const res = await callBigWinApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, user_db[chatId].token);
+        if (res?.data?.list) {
+            const last = res.data.list[0];
+            if (last.issueNumber !== user_db[chatId].lastIssue) {
+                const historyStr = res.data.list.slice(0, 15).map(i => `${parseInt(i.number) >= 5 ? 'B' : 'S'}`).join(',');
+                
+                // AI ခန့်မှန်းချက်တောင်းမယ်
+                const aiRes = await askGemini(`Last results: ${historyStr}. Now period ${last.issueNumber} is ${parseInt(last.number) >= 5 ? 'Big' : 'Small'}. Predict next.`, true);
+                
+                user_db[chatId].lastIssue = last.issueNumber;
+                const nextIssue = (BigInt(last.issueNumber) + 1n).toString();
 
-                if (data.last_pred_side) {
-                    const isWin = data.last_pred_side.toUpperCase().includes(realSide.toUpperCase());
-                    bot.sendMessage(chatId, `💥 **VIP RESULT**\nPeriod: ${history[0].issueNumber}\nResult: ${realSide}(${history[0].number})\nStatus: ${isWin ? "နိုင်ပြီ🏆" : "ရှုံးပြီ💔"}`);
-                    data.aiLogs.unshift({ status: isWin ? "✅" : "❌", issue: history[0].issueNumber.slice(-3), result: realSide });
-                }
-
-                // AI Prediction with Gemini
-                const aiResponse = await askGemini(history);
-                data.last_issue = history[0].issueNumber;
-                data.nextIssue = (BigInt(history[0].issueNumber) + 1n).toString();
-                data.last_pred_side = aiResponse.toUpperCase().includes("BIG") ? "Big" : "Small";
-
-                bot.sendMessage(chatId, `🚀 **Gemini AI Prediction (Free)**\n━━━━━━━━━━━━━━━━\n${aiResponse}\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``, {
-                    reply_markup: { inline_keyboard: [[{ text: "🔵 Big", callback_data: "bet_Big" }, { text: "🔴 Small", callback_data: "bet_Small" }]] }
-                });
+                const report = `🔔 **New Result Out!**\n━━━━━━━━━━━━━━\n🗓 ပွဲစဉ်: ${last.issueNumber}\n🎲 ရလဒ်: ${parseInt(last.number) >= 5 ? 'BIG' : 'SMALL'} (${last.number})\n\n🔮 **AI ခန့်မှန်းချက် (ပွဲစဉ် ${nextIssue.slice(-5)})**\n${aiRes}\n\n👇 အောက်က Button တွေသုံးပြီး ထိုးနိုင်ပါတယ်။`;
+                
+                bot.sendMessage(chatId, report, mainMenu);
             }
         }
         await new Promise(r => setTimeout(r, 4000));
     }
 }
 
-// --- 📱 Message Handlers ---
+// --- 📱 Message Handler ---
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = (msg.text || "").trim();
-    if (!user_db[chatId]) user_db[chatId] = { running: false, aiLogs: [], betHistory: [] };
 
-    if (text === "/start") return bot.sendMessage(chatId, "🤖 **WinGo VIP v86 (Gemini Edition)**\nဖုန်းနံပါတ်ပေးပါ:");
+    if (!user_db[chatId]) user_db[chatId] = { running: false, aiLogs: [], token: null };
 
-    if (/^\d{9,11}$/.test(text) && !user_db[chatId].token) { 
-        user_db[chatId].tempPhone = text; 
-        return bot.sendMessage(chatId, "🔐 Password ပေးပါ:"); 
+    // 1. Start Command
+    if (text === "/start") {
+        return bot.sendMessage(chatId, "👋 မင်္ဂလာပါ! ကျွန်တော်က WinGo VIP Gemini Bot ပါ။\n\nဖုန်းနံပါတ် ရိုက်ထည့်ပြီး Login ဝင်ပေးပါ။", { reply_markup: { remove_keyboard: true } });
     }
 
-    if (user_db[chatId].tempPhone && !user_db[chatId].token) {
-        const res = await callBigWinApi("Login", { phonetype: -1, logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: text });
+    // 2. Login Flow
+    if (/^\d{9,11}$/.test(text) && !user_db[chatId].token) {
+        user_db[chatId].tempPhone = text;
+        return bot.sendMessage(chatId, "🔐 Password ရိုက်ထည့်ပါ:");
+    }
+
+    if (user_db[chatId].tempPhone && !user_db[chatId].token && text.length > 3) {
+        const res = await callBigWinApi("Login", { logintype: "mobile", username: "95" + user_db[chatId].tempPhone.replace(/^0/, ''), pwd: text });
         if (res?.msgCode === 0) {
             user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
-            user_db[chatId].running = true; 
-            monitoringLoop(chatId);
-            bot.sendMessage(chatId, "✅ Gemini AI ချိတ်ဆက်ပြီးပါပြီ။ Signal စောင့်ကြည့်နေပါသည်-", {
-                reply_markup: { keyboard: [["📈 AI History"]], resize_keyboard: true }
-            });
+            user_db[chatId].running = true;
+            bot.sendMessage(chatId, "✅ Login အောင်မြင်သည်။ အခုကစပြီး Gemini AI နဲ့ စကားပြောနိုင်ပါပြီ။ Website ရလဒ်တွေကိုလည်း Auto ပို့ပေးပါမယ်။", mainMenu);
+            startMonitoring(chatId);
         } else {
-            bot.sendMessage(chatId, "❌ Login မှားယွင်းသည်။");
+            bot.sendMessage(chatId, "❌ Login မှားယွင်းနေပါသည်။ ဖုန်းနံပါတ် ပြန်ရိုက်ပါ။");
             user_db[chatId].tempPhone = null;
         }
+        return;
     }
 
-    if (text === "📈 AI History") {
-        let txt = "📈 **Gemini AI History**\n------------------\n";
-        user_db[chatId].aiLogs.slice(0, 15).forEach(l => { txt += `${l.status} ပွဲ: ${l.issue} | Result: ${l.result}\n`; });
-        bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိသေးပါ။");
+    // 3. Menu Buttons Logic
+    if (text === "📊 Website Results") {
+        const res = await callBigWinApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 15, typeId: 30 }, user_db[chatId].token);
+        let str = "📊 **နောက်ဆုံးရလဒ် ၁၅ ပွဲ**\n\n";
+        res?.data?.list?.forEach(i => { str += `🔹 ${i.issueNumber.slice(-3)} ➔ ${parseInt(i.number)>=5?'BIG':'SMALL'}\n`; });
+        return bot.sendMessage(chatId, str, mainMenu);
     }
 
+    if (text === "🔵 Bet BIG" || text === "🔴 Bet SMALL") {
+        user_db[chatId].pendingSide = text.includes("BIG") ? "Big" : "Small";
+        return bot.sendMessage(chatId, `💰 **${user_db[chatId].pendingSide}** အတွက် ထိုးမည့်ပမာဏ (ဥပမာ- 1000) ကို ရိုက်ထည့်ပါ:`);
+    }
+
+    // 4. Betting Amount Input
     if (user_db[chatId].pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
-        const data = user_db[chatId];
-        const fresh = await callBigWinApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
-        const targetIssue = fresh?.data?.list ? (BigInt(fresh.data.list[0].issueNumber) + 1n).toString() : data.nextIssue;
-        let baseUnit = amount < 10000 ? 10 : 100;
-        const betRes = await callBigWinApi("GameBetting", { 
-            typeId: 30, issuenumber: targetIssue, gameType: 2, amount: baseUnit, 
-            betCount: Math.floor(amount / baseUnit), selectType: data.pendingSide === "Big" ? 13 : 14, isAgree: true 
-        }, data.token);
-        bot.sendMessage(chatId, betRes?.msgCode === 0 ? `✅ **${amount}** MMK ထိုးပြီးပါပြီ။` : `❌ Error: ${betRes?.message}`);
+        const side = user_db[chatId].pendingSide;
+        const res = await callBigWinApi("GameBetting", { 
+            typeId: 30, issuenumber: (BigInt(user_db[chatId].lastIssue) + 1n).toString(), 
+            gameType: 2, amount: 10, betCount: Math.floor(amount / 10), 
+            selectType: side === "Big" ? 13 : 14, isAgree: true 
+        }, user_db[chatId].token);
+        
+        bot.sendMessage(chatId, res?.msgCode === 0 ? `✅ **${side}** မှာ **${amount}** MMK ထိုးပြီးပါပြီ။` : `❌ Error: ${res?.message}`);
         user_db[chatId].pendingSide = null;
+        return;
     }
-});
 
-bot.on("callback_query", (query) => {
-    user_db[query.message.chat.id].pendingSide = query.data.split('_')[1];
-    bot.sendMessage(query.message.chat.id, `💰 **${user_db[query.message.chat.id].pendingSide}** အတွက် ပမာဏရိုက်ထည့်ပါ:`);
+    // 5. Gemini General Chat (If not a menu command)
+    const menuCommands = ["📊 Website Results", "📈 AI History", "🔵 Bet BIG", "🔴 Bet SMALL", "📜 Bet Record", "🚪 Logout"];
+    if (user_db[chatId].token && !menuCommands.includes(text) && !user_db[chatId].pendingSide) {
+        bot.sendChatAction(chatId, "typing");
+        const aiReply = await askGemini(text);
+        bot.sendMessage(chatId, aiReply, mainMenu);
+    }
 });
