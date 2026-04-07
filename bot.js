@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const http = require('http');
 
 // Render Alive Fix
-http.createServer((req, res) => { res.end('WinGo v81: Auto 20-Game Flow'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v81: Detailed Profit Tracker'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -12,7 +12,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// --- 🛡️ Security Logic ---
+// --- 🛡️ Security & API Helpers ---
 function generateRandomKey() {
     return "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         let r = Math.random() * 16 | 0;
@@ -32,20 +32,14 @@ function signMd5(payload) {
 async function callApi(endpoint, data, authToken = null) {
     const payload = { ...data, language: 0, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
     payload.signature = signMd5(payload);
-    const headers = { 
-        "Content-Type": "application/json;charset=UTF-8", 
-        "Authorization": authToken || "",
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-        "Referer": "https://bigwinqaz.com/",
-        "Origin": "https://bigwinqaz.com"
-    };
+    const headers = { "Content-Type": "application/json;charset=UTF-8", "Authorization": authToken || "" };
     try {
         const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 12000 });
         return res.data;
     } catch (e) { return null; }
 }
 
-// --- 🧠 AI Logic ---
+// --- 🧠 AI Signal Logic ---
 function runAI(history) {
     const resArr = history.map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
     const last3 = resArr.slice(0, 3).reverse().join('-');
@@ -70,8 +64,9 @@ async function monitoringLoop(chatId) {
             if (lastRound.issueNumber !== data.last_issue) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
                 let autoMsg = "";
+                let roundProfit = 0;
 
-                // 1. Result & Pending Update
+                // 1. Result & Pending Update with Individual Profit
                 if (data.last_pred) {
                     const isWin = data.last_pred === realSide;
                     const statusEmoji = isWin ? "အနိုင်ရရှိသည်🏆" : "ရှုံးနိမ့်သည်💔";
@@ -79,14 +74,24 @@ async function monitoringLoop(chatId) {
                     data.aiLogs.unshift({ status: isWin ? "✅" : "❌", issue: lastRound.issueNumber.slice(-3), result: realSide });
                     if (data.aiLogs.length > 50) data.aiLogs.pop();
 
-                    // Pending ဖြစ်နေတာတွေကို နိုင်/ရှုံး ပြောင်းမယ်
+                    // Bet History Update & Profit Calculation
                     data.betHistory.forEach(bet => {
                         if (bet.issue === lastRound.issueNumber.slice(-5) && bet.status === "⏳ Pending") {
-                            bet.status = (bet.side === realSide) ? "✅ WIN" : "❌ LOSS";
+                            if (bet.side === realSide) {
+                                bet.status = "✅ WIN";
+                                bet.pnl = +(bet.amount * 0.96).toFixed(2); // အသားတင်အမြတ်
+                                roundProfit += bet.pnl;
+                            } else {
+                                bet.status = "❌ LOSS";
+                                bet.pnl = -bet.amount; // အရင်းအရှုံး
+                                roundProfit += bet.pnl;
+                            }
                         }
                     });
+                    data.totalProfit += roundProfit;
 
-                    autoMsg = `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${lastRound.issueNumber}\n🎰 Pick   : ${data.last_pred.toUpperCase()}\n🎲 Status : ${statusEmoji} | ${realSide.toUpperCase()}(${lastRound.number})\n\n`;
+                    const pnlSign = roundProfit >= 0 ? "+" : "";
+                    autoMsg = `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${lastRound.issueNumber}\n🎰 Pick   : ${data.last_pred.toUpperCase()}\n🎲 Status : ${statusEmoji} | ${realSide.toUpperCase()}(${lastRound.number})\n💰 ပွဲစဉ်အမြတ် : **${pnlSign}${roundProfit.toFixed(2)}** MMK\n💵 စုစုပေါင်း : **${data.totalProfit.toFixed(2)}** MMK\n\n`;
                     
                     autoMsg += `📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၂၀ ပွဲ)**\n------------------\n`;
                     data.aiLogs.slice(0, 20).forEach(l => { autoMsg += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${l.result}\n`; });
@@ -120,9 +125,8 @@ async function monitoringLoop(chatId) {
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
-    if (!user_db[chatId]) user_db[chatId] = { running: false, aiLogs: [], betHistory: [] };
+    if (!user_db[chatId]) user_db[chatId] = { running: false, aiLogs: [], betHistory: [], totalProfit: 0 };
 
-    // Betting Process
     if (user_db[chatId].pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
         const data = user_db[chatId];
@@ -137,7 +141,7 @@ bot.on('message', async (msg) => {
         
         if (res?.msgCode === 0 || res?.msg === "Bet success") {
             bot.sendMessage(chatId, `✅ **${data.pendingSide}** မှာ **${amount}** MMK ထိုးပြီးပါပြီ။`);
-            data.betHistory.unshift({ issue: targetIssue.slice(-5), side: data.pendingSide, amount, status: "⏳ Pending" });
+            data.betHistory.unshift({ issue: targetIssue.slice(-5), side: data.pendingSide, amount, status: "⏳ Pending", pnl: 0 });
         } else { bot.sendMessage(chatId, `❌ Error: \`${res ? res.message : "Error"}\``); }
         user_db[chatId].pendingSide = null; return;
     }
@@ -145,20 +149,16 @@ bot.on('message', async (msg) => {
     const menu = { reply_markup: { keyboard: [["📊 Website (100)", "📜 Bet History"], ["📈 AI History", "🚪 Logout"]], resize_keyboard: true } };
 
     if (text === '/start') {
-        user_db[chatId] = { running: false, aiLogs: [], betHistory: [], token: null };
+        user_db[chatId] = { running: false, aiLogs: [], betHistory: [], totalProfit: 0, token: null };
         return bot.sendMessage(chatId, "🤖 **WinGo VIP Master v81.0**\nဖုန်းနံပါတ် ပေးပါ:", menu);
     }
 
-    if (text === "📊 Website (100)") {
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, user_db[chatId].token);
-        let list = "📊 **ဂိမ်းရလဒ် ၂၀ ပွဲ**\n------------------\n";
-        res?.data?.list?.forEach(i => { list += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number)>=5?'Big':'Small'})\n`; });
-        return bot.sendMessage(chatId, list);
-    }
-
     if (text === "📜 Bet History") {
-        let txt = "📜 **နိုင်/ရှုံး မှတ်တမ်း (နောက်ဆုံး ၂၀ ပွဲ)**\n------------------\n";
-        user_db[chatId].betHistory.slice(0, 20).forEach(h => { txt += `${h.status} | ပွဲ: ${h.issue} | ${h.side} | ${h.amount} MMK\n`; });
+        let txt = `📜 **နိုင်/ရှုံး အသေးစိတ်မှတ်တမ်း**\n💰 စုစုပေါင်းအမြတ်: **${user_db[chatId].totalProfit.toFixed(2)}** MMK\n------------------\n`;
+        user_db[chatId].betHistory.slice(0, 20).forEach(h => { 
+            const pnlTxt = h.status === "⏳ Pending" ? "" : ` (${h.pnl >= 0 ? "+" : ""}${h.pnl})`;
+            txt += `${h.status} | ပွဲ: ${h.issue} | ${h.side} | ${h.amount} ${pnlTxt}\n`; 
+        });
         return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိပါ။");
     }
 
@@ -166,6 +166,13 @@ bot.on('message', async (msg) => {
         let txt = "📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၅၀ ပွဲ)**\n------------------\n";
         user_db[chatId].aiLogs.forEach(l => { txt += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${l.result}\n`; });
         return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိပါ။");
+    }
+
+    if (text === "📊 Website (100)") {
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, user_db[chatId].token);
+        let list = "📊 **ဂိမ်းရလဒ် ၂၀ ပွဲ**\n------------------\n";
+        res?.data?.list?.forEach(i => { list += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number)>=5?'Big':'Small'})\n`; });
+        return bot.sendMessage(chatId, list);
     }
 
     // Login Logic
