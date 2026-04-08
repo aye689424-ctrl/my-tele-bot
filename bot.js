@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo v81: Fixed Auto Bet'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v81: Stop Limit Fixed'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -108,26 +108,39 @@ async function placeAutoBet(chatId, side, amount, stepIndex) {
     }
 }
 
-// --- Execute Auto Bet Logic (FIXED) ---
+// --- Execute Auto Bet Logic (STOP LIMIT FIXED) ---
 async function executeAutoBet(chatId, isWin) {
     const data = user_db[chatId];
     if (!data.autoBetActive) return;
     
-    console.log(`[DEBUG] executeAutoBet - isWin: ${isWin}, mode: ${data.autoMode}, step: ${data.currentBetStep}, plan: ${data.betPlan}`);
-    
     if (isWin) {
-        // WIN: Reset everything
-        data.autoBetActive = false;
-        data.consecutiveLosses = 0;
+        // WIN: Increase consecutive wins count
         data.consecutiveWins++;
+        data.consecutiveLosses = 0;
+        
+        bot.sendMessage(chatId, `✅ Auto Bet WIN! (${data.consecutiveWins}/${data.stopLimit} wins needed to stop)`);
+        
+        // Check if stop limit reached
+        if (data.consecutiveWins >= data.stopLimit) {
+            bot.sendMessage(chatId, `🛑 **Stop Limit Reached!** (${data.stopLimit} wins)\nAuto Bet Stopped.`);
+            data.autoBetActive = false;
+            data.autoBetStarted = false;
+            data.consecutiveWins = 0;
+            data.currentBetStep = 0;
+            return;
+        }
+        
+        // Reset bet step after win (start from step 0 again)
         data.currentBetStep = 0;
         
-        bot.sendMessage(chatId, `✅ Auto Bet WIN! Stopped. Loss streak reset.`);
-        
-        if (data.consecutiveWins >= data.stopLimit) {
-            bot.sendMessage(chatId, `🛑 Auto Bet Stopped: ${data.stopLimit} win(s) reached.`);
+        // Continue auto betting with step 0 (first amount)
+        const nextAmount = data.betPlan[0];
+        bot.sendMessage(chatId, `📈 WIN! Continuing auto bet with ${nextAmount} MMK (Step 1/${data.betPlan.length})`);
+        const success = await placeAutoBet(chatId, data.autoSide, nextAmount, 0);
+        if (!success) {
             data.autoBetActive = false;
-            data.consecutiveWins = 0;
+            data.autoBetStarted = false;
+            bot.sendMessage(chatId, `❌ Auto Bet Stopped due to error.`);
         }
         return;
     }
@@ -135,6 +148,8 @@ async function executeAutoBet(chatId, isWin) {
     // LOSS
     data.consecutiveLosses++;
     data.consecutiveWins = 0;
+    
+    bot.sendMessage(chatId, `❌ Auto Bet LOSS! (Loss streak: ${data.consecutiveLosses})`);
     
     if (data.autoMode === "martingale") {
         // Martingale: bet next step after loss
@@ -148,24 +163,29 @@ async function executeAutoBet(chatId, isWin) {
             const success = await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
             if (!success) {
                 data.autoBetActive = false;
+                data.autoBetStarted = false;
                 bot.sendMessage(chatId, `❌ Auto Bet Stopped due to error.`);
             }
         } else {
             bot.sendMessage(chatId, `❌ Max bet step reached (${data.betPlan.length} steps)! Auto Bet Stopped.`);
             data.autoBetActive = false;
+            data.autoBetStarted = false;
             data.currentBetStep = 0;
+            data.consecutiveWins = 0;
         }
     }
     else if (data.autoMode === "trigger") {
         // Trigger mode: only start after 7 losses
-        if (data.consecutiveLosses >= 7 && !data.autoBetActive) {
+        if (data.consecutiveLosses >= 7 && !data.autoBetActive && !data.autoBetStarted) {
             data.autoBetActive = true;
+            data.autoBetStarted = true;
             data.currentBetStep = 0;
             const firstAmount = data.betPlan[0];
             bot.sendMessage(chatId, `⚠️ 7 Consecutive Losses! Starting Auto Bet: ${data.autoSide} | ${firstAmount} MMK`);
             const success = await placeAutoBet(chatId, data.autoSide, firstAmount, 0);
             if (!success) {
                 data.autoBetActive = false;
+                data.autoBetStarted = false;
             }
         }
         else if (data.autoBetActive) {
@@ -177,10 +197,12 @@ async function executeAutoBet(chatId, isWin) {
                 const success = await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
                 if (!success) {
                     data.autoBetActive = false;
+                    data.autoBetStarted = false;
                 }
             } else {
                 bot.sendMessage(chatId, `❌ Max bet step reached! Auto Bet Stopped.`);
                 data.autoBetActive = false;
+                data.autoBetStarted = false;
                 data.currentBetStep = 0;
             }
         }
@@ -243,8 +265,9 @@ async function monitoringLoop(chatId) {
                     data.autoBetStarted = true;
                     data.currentBetStep = 0;
                     data.consecutiveLosses = 0;
+                    data.consecutiveWins = 0;
                     const firstAmount = data.betPlan[0];
-                    bot.sendMessage(chatId, `🤖 Starting Martingale: ${ai.side} | ${firstAmount} MMK (${data.betPlan.length} steps plan: ${data.betPlan.join(', ')})`);
+                    bot.sendMessage(chatId, `🤖 Starting Martingale: ${ai.side} | ${firstAmount} MMK\nStop Limit: ${data.stopLimit} win(s) to stop`);
                     const success = await placeAutoBet(chatId, ai.side, firstAmount, 0);
                     if (!success) {
                         data.autoBetActive = false;
@@ -252,12 +275,12 @@ async function monitoringLoop(chatId) {
                     }
                 }
 
-                // Send message with bet plan display
+                // Send message
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
                 let modeText = data.autoMode === "martingale" ? "Martingale (Loss→Bet)" : "Trigger (7 Loss→Bet)";
                 let autoStatus = data.autoBetActive ? "ACTIVE ✅" : "STANDBY ⏳";
                 
-                let msg = `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${ai.brainInfo}\`\n🛡 Pattern: \`${ai.pattern}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း: **${ai.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n📊 Confidence: \`${ai.confidence}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\`\n━━━━━━━━━━━━━━━━\n🤖 **Auto Bet Settings**\n📋 Bet Plan: \`${data.betPlan.join(' → ')}\`\n🎯 Mode: ${modeText}\n⚡ Status: ${autoStatus}\n📉 Loss Streak: ${data.consecutiveLosses || 0}\n🔢 Current Step: ${data.currentBetStep+1}/${data.betPlan.length}`;
+                let msg = `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${ai.brainInfo}\`\n🛡 Pattern: \`${ai.pattern}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း: **${ai.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n📊 Confidence: \`${ai.confidence}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\`\n━━━━━━━━━━━━━━━━\n🤖 **Auto Bet Settings**\n📋 Bet Plan: \`${data.betPlan.join(' → ')}\`\n🎯 Mode: ${modeText}\n⚡ Status: ${autoStatus}\n🏆 Stop Limit: ${data.stopLimit} win(s) to stop\n📉 Loss Streak: ${data.consecutiveLosses || 0}\n✅ Win Streak: ${data.consecutiveWins || 0}\n🔢 Current Step: ${data.currentBetStep+1}/${data.betPlan.length}`;
                 
                 await bot.sendMessage(chatId, msg, {
                     reply_markup: { 
@@ -351,7 +374,7 @@ bot.on('message', async (msg) => {
     
     if (text === "🛑 Set Stop Limit") {
         user_db[chatId].settingMode = "stoplimit";
-        return bot.sendMessage(chatId, "🏆 Stop Limit ထည့်ပါ (အနိုင်ပွဲအရေအတွက်, e.g., 1 or 2):");
+        return bot.sendMessage(chatId, "🏆 Stop Limit ထည့်ပါ (အနိုင်ပွဲအရေအတွက်)\n\nဥပမာ: 1 ဆိုရင် 1 ပွဲအနိုင်ရရင် ရပ်မယ်\n2 ဆိုရင် 2 ပွဲဆက်နိုင်မှ ရပ်မယ်");
     }
     
     if (text === "⚠️ Set Loss Limit") {
@@ -370,7 +393,7 @@ bot.on('message', async (msg) => {
         user_db[chatId].currentBetStep = 0;
         user_db[chatId].consecutiveLosses = 0;
         user_db[chatId].consecutiveWins = 0;
-        bot.sendMessage(chatId, `✅ Auto Bet Started!\n\nMode: ${user_db[chatId].autoMode === "martingale" ? "Martingale" : "Trigger (7 Loss)"}\nBet Plan: ${user_db[chatId].betPlan.join(' → ')}\n\n⏳ Next AI signal ကျမှ စထိုးပါမည်။`, mainMenu);
+        bot.sendMessage(chatId, `✅ Auto Bet Started!\n\nMode: ${user_db[chatId].autoMode === "martingale" ? "Martingale" : "Trigger (7 Loss)"}\nBet Plan: ${user_db[chatId].betPlan.join(' → ')}\nStop Limit: ${user_db[chatId].stopLimit} win(s) to stop\n\n⏳ Next AI signal ကျမှ စထိုးပါမည်။`, mainMenu);
     }
     
     if (text === "❌ Stop Auto Bet") {
@@ -399,7 +422,7 @@ bot.on('message', async (msg) => {
             const num = parseInt(text);
             if (!isNaN(num) && num > 0) {
                 user_db[chatId].stopLimit = num;
-                bot.sendMessage(chatId, `✅ Stop Limit updated: ${num} win(s)`);
+                bot.sendMessage(chatId, `✅ Stop Limit updated: ${num} win(s) needed to stop`);
             } else {
                 bot.sendMessage(chatId, "❌ Invalid number.");
             }
