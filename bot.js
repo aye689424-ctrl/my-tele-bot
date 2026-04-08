@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const http = require('http');
 
 // Render Alive Fix
-http.createServer((req, res) => { res.end('WinGo v82: Ultimate Hybrid Sniper'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v82: Full Sniper System'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -12,7 +12,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 let user_db = {};
 
-// --- 🛡️ Security Logic ---
+// --- 🛡️ Security & API Helpers ---
 function generateRandomKey() {
     return "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         let r = Math.random() * 16 | 0;
@@ -39,7 +39,7 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// --- 🧠 Multi-Brain AI Logic (The Core) ---
+// --- 🧠 Multi-Brain AI Logic ---
 function runAI(history) {
     const resArr = history.map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
     const last = resArr[0];
@@ -61,14 +61,12 @@ function runAI(history) {
     let finalSide = votes.Big > votes.Small ? "Big" : "Small";
 
     return { 
-        side: finalSide, 
-        dragon, 
-        confidence: votes[finalSide] === 3 ? "HIGH 🔥" : "NORMAL ⚡",
+        side: finalSide, dragon, confidence: votes[finalSide] === 3 ? "HIGH 🔥" : "NORMAL ⚡",
         info: `B1:${b1[0]}|B2:${b2[0]}|B3:${b3[0]}`
     };
 }
 
-// --- 🚀 Sniper & Betting Loop ---
+// --- 🚀 Sniper & Monitoring Loop ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
@@ -80,15 +78,17 @@ async function monitoringLoop(chatId) {
 
             if (lastRound.issueNumber !== data.last_issue) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
-                let statusInfo = "";
+                let reportStatus = "";
 
+                // 1. Result Processing
                 if (data.last_pred) {
                     const isAiWin = data.last_pred === realSide;
                     data.aiLogs.unshift({ status: isAiWin ? "✅" : "❌", issue: lastRound.issueNumber.slice(-3), result: realSide });
+                    if (data.aiLogs.length > 50) data.aiLogs.pop();
 
                     if (!isAiWin) data.continuousLoss++; else data.continuousLoss = 0;
 
-                    // Bet Processing (Manual + Auto)
+                    // History Update (Both Manual & Auto)
                     data.betHistory.forEach(bet => {
                         if (bet.issue === lastRound.issueNumber.slice(-5) && bet.status === "⏳ Pending") {
                             const won = bet.side === realSide;
@@ -98,16 +98,13 @@ async function monitoringLoop(chatId) {
 
                             if (data.isBettingActive) {
                                 if (won) {
-                                    data.winCount++; data.currentStep = 0;
-                                    if (data.winCount >= data.betStopLimit) {
-                                        data.isBettingActive = false;
-                                        statusInfo = "🎯 Target ပြည့်လို့ နားပါပြီ။";
-                                    }
+                                    data.currentStep = 0; data.isBettingActive = false; // Sniper Mode Stop on Win
+                                    reportStatus = "🎯 Sniper WIN! ပွဲရပ်ပြီး စောင့်ကြည့်စနစ်သို့ ပြန်သွားပါပြီ။";
                                 } else {
                                     data.currentStep++;
                                     if (data.currentStep >= data.betPlan.length) {
                                         data.isBettingActive = false; data.currentStep = 0;
-                                        statusInfo = "⚠️ Plan ကုန်လို့ ဘေးကင်းအောင် ရပ်လိုက်ပါပြီ။";
+                                        reportStatus = "⚠️ Sniper LOSS! Plan ကုန်သွားသဖြင့် ရပ်တန့်လိုက်ပါပြီ။";
                                     }
                                 }
                             }
@@ -115,30 +112,32 @@ async function monitoringLoop(chatId) {
                     });
                 }
 
+                // 2. Prediction & Trigger
                 const ai = runAI(history);
                 data.last_issue = lastRound.issueNumber;
                 data.nextIssue = (BigInt(lastRound.issueNumber) + 1n).toString();
                 data.last_pred = ai.side;
 
-                // Sniper Trigger
                 if (!data.isBettingActive && data.continuousLoss >= data.runLossLimit) {
-                    data.isBettingActive = true; data.currentStep = 0; data.winCount = 0;
-                    statusInfo = `🚨 AI ${data.runLossLimit}-Loss streak! Auto Bet စတင်ပါပြီ။`;
+                    data.isBettingActive = true; data.currentStep = 0;
+                    reportStatus = `🚨 AI ${data.runLossLimit} ပွဲဆက်တိုက်ရှုံးသဖြင့် Auto Bet စတင်ပါပြီ။`;
                 }
 
-                let uiMode = data.isBettingActive 
+                // 3. Notification Message
+                let modeTxt = data.isBettingActive 
                     ? `🔥 **STATUS: AUTO BETTING**\n💰 Step-${data.currentStep+1}: **${data.betPlan[data.currentStep]}** MMK`
                     : `🔭 **STATUS: SNIPER WAITING**\n📉 AI Loss Streak: **${data.continuousLoss}** / ${data.runLossLimit}`;
 
-                const message = `🚀 **ULTIMATE VIP AI v82**\n━━━━━━━━━━━━━━\n🧠 Logic: \`${ai.info}\`\n🎯 AI Choice: **${ai.side.toUpperCase()}**\n📊 Confidence: ${ai.confidence}\n🕒 Period: \`${data.nextIssue.slice(-5)}\`\n\n${uiMode}\n💰 Profit: **${data.totalProfit.toFixed(2)}** MMK\n📢 ${statusInfo}`;
+                const mainMsg = `🚀 **VIP HYBRID SNIPER v82**\n━━━━━━━━━━━━━━\n🧠 Logic: \`${ai.info}\`\n🎯 AI ခန့်မှန်းချက်: **${ai.side.toUpperCase()}**\n📊 Confidence: ${ai.confidence}\n🕒 Period: \`${data.nextIssue.slice(-5)}\`\n\n${modeTxt}\n💰 စုစုပေါင်းအမြတ်: **${data.totalProfit.toFixed(2)}** MMK\n📢 ${reportStatus}`;
 
-                await bot.sendMessage(chatId, message, {
+                await bot.sendMessage(chatId, mainMsg, {
                     reply_markup: { inline_keyboard: [
                         [{ text: "🔵 Manual Big", callback_data: "man_Big" }, { text: "🔴 Manual Small", callback_data: "man_Small" }],
                         [{ text: "⚙️ SETUP", callback_data: "setup" }]
                     ]}
                 });
 
+                // 4. Auto Bet Execution
                 if (data.isBettingActive) {
                     const amt = data.betPlan[data.currentStep];
                     await callApi("GameBetting", { typeId: 30, issuenumber: data.nextIssue, gameType: 2, amount: 10, betCount: Math.floor(amt/10), selectType: ai.side === "Big" ? 13 : 14, isAgree: true }, data.token);
@@ -150,57 +149,64 @@ async function monitoringLoop(chatId) {
     }
 }
 
-// --- 📱 Interaction Handlers ---
+// --- 📱 Bot Handlers ---
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
-    if (!user_db[chatId]) user_db[chatId] = { running: false, aiLogs: [], betHistory: [], totalProfit: 0, betPlan: [10, 30, 90, 270, 810, 2430, 7290], currentStep: 0, continuousLoss: 0, runLossLimit: 7, betStopLimit: 1, isBettingActive: false, winCount: 0 };
+    if (!user_db[chatId]) user_db[chatId] = { running: false, aiLogs: [], betHistory: [], totalProfit: 0, betPlan: [10, 30, 90, 270, 810, 2430, 7290], currentStep: 0, continuousLoss: 0, runLossLimit: 7, isBettingActive: false };
     const data = user_db[chatId];
 
     if (data.inputMode === 'plan') {
         data.betPlan = text.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-        bot.sendMessage(chatId, "✅ Plan Saved!"); data.inputMode = null; return;
+        bot.sendMessage(chatId, "✅ Martingale Plan သိမ်းဆည်းပြီးပါပြီ။"); data.inputMode = null; return;
     }
     if (data.inputMode === 'runloss') {
         data.runLossLimit = parseInt(text);
-        bot.sendMessage(chatId, `✅ AI ${text} ပွဲရှုံးမှ စထိုးပါမည်။`); data.inputMode = null; return;
+        bot.sendMessage(chatId, `✅ AI ${text} ပွဲရှုံးမှ စထိုးရန် ပြင်ဆင်ပြီးပါပြီ။`); data.inputMode = null; return;
     }
-    if (data.inputMode === 'manual_amt') {
+    if (data.inputMode === 'man_amt') {
         const amt = parseInt(text);
         const res = await callApi("GameBetting", { typeId: 30, issuenumber: data.nextIssue, gameType: 2, amount: 10, betCount: Math.floor(amt/10), selectType: data.manualSide === "Big" ? 13 : 14, isAgree: true }, data.token);
         if (res?.msgCode === 0) {
-            bot.sendMessage(chatId, `✅ Manual Bet Success: ${data.manualSide} (${amt} MMK)`);
+            bot.sendMessage(chatId, `✅ Manual Bet: ${data.manualSide} (${amt} MMK) အောင်မြင်သည်။`);
             data.betHistory.unshift({ issue: data.nextIssue.slice(-5), side: data.manualSide, amount: amt, status: "⏳ Pending", pnl: 0 });
         } else { bot.sendMessage(chatId, "❌ Bet Error!"); }
         data.inputMode = null; return;
     }
 
-    const mainButtons = { reply_markup: { keyboard: [["📊 Website", "📜 Bet History"], ["📈 AI Logs", "⚙️ SETUP"]], resize_keyboard: true } };
+    const menu = { reply_markup: { keyboard: [["📊 Website", "📜 Bet History"], ["📈 AI History", "⚙️ SETUP"]], resize_keyboard: true } };
 
     if (text === '/start') {
         data.running = false;
-        return bot.sendMessage(chatId, "🤖 **Ultimate Hybrid Sniper v82**\nဖုန်းနံပါတ်ပေးပါ:", mainButtons);
+        return bot.sendMessage(chatId, "🤖 **Hybrid Sniper Bot v82.0**\nဖုန်းနံပါတ်ပေးပါ:", menu);
     }
-    
-    if (text === "⚙️ SETUP") {
-        return bot.sendMessage(chatId, "⚙️ ပြင်ဆင်ရန် ရွေးချယ်ပါ-", {
-            reply_markup: { inline_keyboard: [
-                [{ text: "Run Loss Limit ပြင်ရန် (7?)", callback_data: "set_run" }],
-                [{ text: "Martingale Plan ပြင်ရန်", callback_data: "set_plan" }]
-            ]}
-        });
+
+    if (text === "📊 Website") {
+        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, data.token);
+        let list = "📊 **ဂိမ်းရလဒ် ၂၀ ပွဲ**\n------------------\n";
+        res?.data?.list?.forEach(i => { list += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number)>=5?'Big':'Small'})\n`; });
+        return bot.sendMessage(chatId, list || "Error fetching results.");
     }
 
     if (text === "📜 Bet History") {
-        let txt = `📜 **HISTORY** (Total: ${data.totalProfit.toFixed(2)})\n`;
-        data.betHistory.slice(0, 15).forEach(h => txt += `${h.status} | ${h.issue} | ${h.amount} MMK\n`);
-        return bot.sendMessage(chatId, txt || "No records.");
+        let txt = `📜 **နိုင်/ရှုံး မှတ်တမ်း** (Total: ${data.totalProfit.toFixed(2)})\n------------------\n`;
+        data.betHistory.slice(0, 20).forEach(h => txt += `${h.status} | ပွဲ: ${h.issue} | ${h.side} | ${h.amount} MMK\n`);
+        return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိသေးပါ။");
     }
 
-    if (text === "📈 AI Logs") {
-        let txt = "📈 **AI History**\n";
-        data.aiLogs.slice(0, 20).forEach(l => txt += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${l.result}\n`);
-        return bot.sendMessage(chatId, txt || "No records.");
+    if (text === "📈 AI History") {
+        let txt = "📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၅၀ ပွဲ)**\n------------------\n";
+        data.aiLogs.slice(0, 50).forEach(l => txt += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${l.result}\n`);
+        return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိသေးပါ။");
+    }
+
+    if (text === "⚙️ SETUP") {
+        return bot.sendMessage(chatId, `⚙️ **Sniper Setup**\n\nAI Loss Limit: ${data.runLossLimit} ပွဲ\nPlan: ${data.betPlan.join(',')}`, {
+            reply_markup: { inline_keyboard: [
+                [{ text: "Run Loss Limit ပြင်ရန်", callback_data: "set_run" }],
+                [{ text: "Martingale Plan ပြင်ရန်", callback_data: "set_plan" }]
+            ]}
+        });
     }
 
     // Login
@@ -212,8 +218,8 @@ bot.on('message', async (msg) => {
         if (res?.msgCode === 0) {
             data.token = res.data.tokenHeader + " " + res.data.token;
             data.running = true; monitoringLoop(chatId);
-            bot.sendMessage(chatId, "✅ Sniper Active!", mainButtons);
-        } else { bot.sendMessage(chatId, "❌ Login Error!"); data.phone = null; }
+            bot.sendMessage(chatId, "✅ Sniper Active!", menu);
+        } else { bot.sendMessage(chatId, "❌ Login Failed!"); data.phone = null; }
     }
 });
 
@@ -221,10 +227,9 @@ bot.on('callback_query', (q) => {
     const data = user_db[q.message.chat.id];
     if (q.data.startsWith("man_")) {
         data.manualSide = q.data.split('_')[1];
-        data.inputMode = 'manual_amt';
+        data.inputMode = 'man_amt';
         bot.sendMessage(q.message.chat.id, `💰 Manual (${data.manualSide}) ထိုးမည့်ပမာဏ:`);
     }
-    if (q.data === "setup") bot.sendMessage(q.message.chat.id, "SETUP Menu ကို Keyboard မှာ နှိပ်ပါဗျာ။");
     if (q.data === "set_run") { data.inputMode = 'runloss'; bot.sendMessage(q.message.chat.id, "AI ဘယ်နှစ်ပွဲရှုံးမှ စထိုးမလဲ (ဥပမာ: 7):"); }
     if (q.data === "set_plan") { data.inputMode = 'plan'; bot.sendMessage(q.message.chat.id, "ဆတိုး Plan ပေးပါ (10,30,90...):"); }
 });
