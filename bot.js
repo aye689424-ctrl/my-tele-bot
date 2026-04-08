@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo v90: 10 AI Brain System'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v100: 10 AI Voting + Analysis System'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -44,33 +44,31 @@ function getHistoryArray(history) {
     return history.map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
 }
 
-// AI 1: Pattern Hunter (နောက်ဆုံး 3 ပွဲ pattern)
+// AI 1: Pattern Hunter
 function aiPatternHunter(historyArr) {
     if (historyArr.length < 3) return null;
     const last3 = historyArr.slice(0, 3);
-    // Pattern: A-B-A ဆိုရင် B ရဲ့ဆန့်ကျင်ဘက်
     if (last3[0] === last3[2]) {
         return last3[1] === "Big" ? "Small" : "Big";
     }
-    // Pattern: A-A-B ဆိုရင် B အတိုင်း
     if (last3[0] === last3[1]) {
         return last3[2];
     }
     return null;
 }
 
-// AI 2: Dragon Follower (ဆက်တိုက်ကြီး/သေး)
+// AI 2: Dragon Follower
 function aiDragonFollower(historyArr) {
     let dragon = 1;
     for(let i = 0; i < historyArr.length - 1; i++) {
         if(historyArr[i] === historyArr[i+1]) dragon++;
         else break;
     }
-    if(dragon >= 3) return historyArr[0]; // ဆက်ထိုး
-    return null; // မသေချာရင် null
+    if(dragon >= 3) return historyArr[0];
+    return null;
 }
 
-// AI 3: Probability Master (၁၀ ပွဲအချိုး)
+// AI 3: Probability Master
 function aiProbabilityMaster(historyArr) {
     const last10 = historyArr.slice(0, 10);
     const bigCount = last10.filter(x => x === "Big").length;
@@ -79,7 +77,7 @@ function aiProbabilityMaster(historyArr) {
     return null;
 }
 
-// AI 4: Alternation Detector (တလှည့်စီကျလား)
+// AI 4: Alternation Detector
 function aiAlternationDetector(historyArr) {
     if(historyArr.length < 4) return null;
     let isAlternating = true;
@@ -90,13 +88,12 @@ function aiAlternationDetector(historyArr) {
         }
     }
     if(isAlternating) {
-        // တလှည့်စီကျနေရင် နောက်တစ်လှည့် ဆန့်ကျင်ဘက်
         return historyArr[0] === "Big" ? "Small" : "Big";
     }
     return null;
 }
 
-// AI 5: Smart Reversal (၃ ပွဲဆက်တူရင် ပြောင်း)
+// AI 5: Smart Reversal
 function aiSmartReversal(historyArr) {
     if(historyArr.length < 3) return null;
     if(historyArr[0] === historyArr[1] && historyArr[1] === historyArr[2]) {
@@ -105,7 +102,7 @@ function aiSmartReversal(historyArr) {
     return null;
 }
 
-// AI 6: Momentum Tracker (နောက်ဆုံး ၅ ပွဲ momentum)
+// AI 6: Momentum Tracker
 function aiMomentumTracker(historyArr) {
     const last5 = historyArr.slice(0, 5);
     const bigCount = last5.filter(x => x === "Big").length;
@@ -116,7 +113,6 @@ function aiMomentumTracker(historyArr) {
 
 // AI 7: Fibonacci Pattern
 function aiFibonacciPattern(historyArr) {
-    // Fibonacci အလိုက် 1,2,3,5,8 ပွဲအလိုက် pattern
     if(historyArr.length < 8) return null;
     const positions = [1, 2, 3, 5, 8];
     let bigVotes = 0, smallVotes = 0;
@@ -129,63 +125,61 @@ function aiFibonacciPattern(historyArr) {
     return null;
 }
 
-// AI 8: Gap Analyzer (Big/Small ကွာဟချက်)
+// AI 8: Gap Analyzer
 function aiGapAnalyzer(historyArr) {
     const last20 = historyArr.slice(0, 20);
     const bigCount = last20.filter(x => x === "Big").length;
-    const smallCount = 20 - bigCount;
-    const gap = Math.abs(bigCount - smallCount);
+    const gap = Math.abs(bigCount - (20 - bigCount));
     if(gap >= 6) {
-        // ကွာဟမှုများနေရင် နည်းတဲ့ဘက်ကို ပြန်လာ
-        return bigCount > smallCount ? "Small" : "Big";
+        return bigCount > (20 - bigCount) ? "Small" : "Big";
     }
     return null;
 }
 
-// AI 9: Trend Extender (လက်ရှိ trend အတိုင်း)
+// AI 9: Trend Extender
 function aiTrendExtender(historyArr) {
     if(historyArr.length < 3) return null;
     if(historyArr[0] === historyArr[1] && historyArr[1] === historyArr[2]) {
-        return historyArr[0]; // trend ဆက်ထိုး
+        return historyArr[0];
     }
     return null;
 }
 
-// AI 10: Contrarian (လူအများစုရဲ့ဆန့်ကျင်ဘက်)
+// AI 10: Contrarian
 function aiContrarian(historyArr) {
     const last10 = historyArr.slice(0, 10);
     const bigCount = last10.filter(x => x === "Big").length;
-    // လူအများစုထိုးမယ့်ဘက်ကို ဆန့်ကျင်
     if(bigCount >= 7) return "Small";
     if(bigCount <= 3) return "Big";
     return null;
 }
 
-// 🗳️ Voting System with Weight
-function votingSystem(historyArr) {
-    const ais = [
-        { name: "Pattern Hunter", func: aiPatternHunter, weight: 2 },
-        { name: "Dragon Follower", func: aiDragonFollower, weight: 2 },
-        { name: "Probability Master", func: aiProbabilityMaster, weight: 1 },
-        { name: "Alternation Detector", func: aiAlternationDetector, weight: 1 },
-        { name: "Smart Reversal", func: aiSmartReversal, weight: 2 },
-        { name: "Momentum Tracker", func: aiMomentumTracker, weight: 1 },
-        { name: "Fibonacci Pattern", func: aiFibonacciPattern, weight: 1 },
-        { name: "Gap Analyzer", func: aiGapAnalyzer, weight: 1 },
-        { name: "Trend Extender", func: aiTrendExtender, weight: 2 },
-        { name: "Contrarian", func: aiContrarian, weight: 1 }
-    ];
-    
+// AI Definitions with weights
+const AI_DEFINITIONS = [
+    { name: "Pattern Hunter", func: aiPatternHunter, weight: 2, correct: 0, total: 0 },
+    { name: "Dragon Follower", func: aiDragonFollower, weight: 2, correct: 0, total: 0 },
+    { name: "Probability Master", func: aiProbabilityMaster, weight: 1, correct: 0, total: 0 },
+    { name: "Alternation Detector", func: aiAlternationDetector, weight: 1, correct: 0, total: 0 },
+    { name: "Smart Reversal", func: aiSmartReversal, weight: 2, correct: 0, total: 0 },
+    { name: "Momentum Tracker", func: aiMomentumTracker, weight: 1, correct: 0, total: 0 },
+    { name: "Fibonacci Pattern", func: aiFibonacciPattern, weight: 1, correct: 0, total: 0 },
+    { name: "Gap Analyzer", func: aiGapAnalyzer, weight: 1, correct: 0, total: 0 },
+    { name: "Trend Extender", func: aiTrendExtender, weight: 2, correct: 0, total: 0 },
+    { name: "Contrarian", func: aiContrarian, weight: 1, correct: 0, total: 0 }
+];
+
+// 🗳️ Voting System with Analysis
+function votingSystem(historyArr, chatId) {
     let votes = { Big: 0, Small: 0 };
     let aiResults = [];
+    let activeAIs = [];
     
-    for(let ai of ais) {
+    for(let ai of AI_DEFINITIONS) {
         const prediction = ai.func(historyArr);
         if(prediction) {
             votes[prediction] += ai.weight;
-            aiResults.push(`${ai.name}: ${prediction} (w${ai.weight})`);
-        } else {
-            aiResults.push(`${ai.name}: Pass`);
+            aiResults.push({ name: ai.name, prediction: prediction, weight: ai.weight });
+            activeAIs.push(ai);
         }
     }
     
@@ -200,18 +194,82 @@ function votingSystem(historyArr) {
         confidence: confidenceLevel,
         confidencePercent: confidencePercent,
         aiResults: aiResults,
-        totalActiveAIs: aiResults.filter(r => !r.includes("Pass")).length
+        activeAIs: activeAIs,
+        totalActiveAIs: activeAIs.length
     };
 }
 
-// --- Dragon detection for display
-function getDragonCount(historyArr) {
-    let dragon = 1;
-    for(let i = 0; i < historyArr.length - 1; i++) {
-        if(historyArr[i] === historyArr[i+1]) dragon++;
-        else break;
+// 📊 Update AI Performance after result
+function updateAIPerformance(chatId, aiResults, actualResult) {
+    const data = user_db[chatId];
+    if (!data.aiPerformance) {
+        data.aiPerformance = {};
+        for(let ai of AI_DEFINITIONS) {
+            data.aiPerformance[ai.name] = { correct: 0, total: 0 };
+        }
     }
-    return dragon;
+    
+    for(let result of aiResults) {
+        const perf = data.aiPerformance[result.name];
+        if(perf) {
+            perf.total++;
+            if(result.prediction === actualResult) {
+                perf.correct++;
+            }
+        }
+    }
+}
+
+// 📈 Get AI Performance Summary
+function getAIPerformanceSummary(chatId) {
+    const data = user_db[chatId];
+    if (!data.aiPerformance) return "No data yet.";
+    
+    let summary = "📊 **AI Performance Summary**\n━━━━━━━━━━━━━━━━\n";
+    for(let ai of AI_DEFINITIONS) {
+        const perf = data.aiPerformance[ai.name];
+        if(perf && perf.total > 0) {
+            const accuracy = Math.round((perf.correct / perf.total) * 100);
+            summary += `\n${ai.name}:\n   ✅ ${perf.correct}/${perf.total} (${accuracy}%)`;
+        }
+    }
+    return summary;
+}
+
+// 🔍 Loss Analysis - Why did we lose?
+function analyzeLoss(chatId, prediction, actualResult, aiResults, confidencePercent) {
+    let analysis = "🔍 **Loss Analysis**\n━━━━━━━━━━━━━━━━\n";
+    analysis += `📌 ကျွန်ုပ်တို့ ခန့်မှန်းခဲ့သည်: **${prediction === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n`;
+    analysis += `📌 တကယ့်ရလဒ်: **${actualResult === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n`;
+    analysis += `📌 Confidence: ${confidencePercent}%\n━━━━━━━━━━━━━━━━\n`;
+    
+    // Find which AIs were wrong
+    let wrongAIs = aiResults.filter(r => r.prediction !== actualResult);
+    let correctAIs = aiResults.filter(r => r.prediction === actualResult);
+    
+    if(wrongAIs.length > 0) {
+        analysis += `\n❌ **မှားယွင်းသော AI များ:**\n`;
+        for(let ai of wrongAIs) {
+            analysis += `   • ${ai.name} (ခန့်မှန်း: ${ai.prediction === "Big" ? "BIG" : "SMALL"})\n`;
+        }
+    }
+    
+    if(correctAIs.length > 0) {
+        analysis += `\n✅ **မှန်ကန်သော AI များ:**\n`;
+        for(let ai of correctAIs) {
+            analysis += `   • ${ai.name} (ခန့်မှန်း: ${ai.prediction === "Big" ? "BIG" : "SMALL"})\n`;
+        }
+    }
+    
+    analysis += `\n💡 **သင်ခန်းစာ:**\n`;
+    if(wrongAIs.length > correctAIs.length) {
+        analysis += `   • ယနေ့ပုံစံသည် ကျွန်ုပ်တို့၏ အဓိက AI များ မှားယွင်းနေပါသည်။\n`;
+        analysis += `   • အကြံပြုချက်: ယာယီရပ်တန့်ပြီး ပုံစံပြောင်းလဲမှုကို စောင့်ကြည့်ပါ။\n`;
+    } else {
+        analysis += `   • အနည်းငယ်သာလွဲချော်နေပါသည်။ ဆက်လက်လုပ်ဆောင်နိုင်ပါသည်။\n`;
+    }
+    
+    return analysis;
 }
 
 // --- Auto Bet Function ---
@@ -354,6 +412,16 @@ async function executeAutoBet(chatId, isWin) {
     }
 }
 
+// --- Get Dragon Count ---
+function getDragonCount(historyArr) {
+    let dragon = 1;
+    for(let i = 0; i < historyArr.length - 1; i++) {
+        if(historyArr[i] === historyArr[i+1]) dragon++;
+        else break;
+    }
+    return dragon;
+}
+
 // --- Monitoring Loop ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
@@ -368,6 +436,7 @@ async function monitoringLoop(chatId) {
             if (lastRound.issueNumber !== data.last_issue) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
                 let roundProfit = 0;
+                let lossAnalysis = "";
 
                 // Check pending bets
                 let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === lastRound.issueNumber.slice(-5));
@@ -392,10 +461,21 @@ async function monitoringLoop(chatId) {
                 }
 
                 // 🧠 Run 10 AI Voting System
-                const aiResult = votingSystem(historyArr);
+                const aiResult = votingSystem(historyArr, chatId);
                 const dragonCount = getDragonCount(historyArr);
+                
+                // Store for auto bet
                 data.autoSide = aiResult.side;
                 data.last_pred = aiResult.side;
+
+                // Update AI Performance after result
+                updateAIPerformance(chatId, aiResult.aiResults, realSide);
+
+                // Check if prediction was wrong and generate analysis
+                const wasWrong = (aiResult.side !== realSide);
+                if (wasWrong && data.last_pred) {
+                    lossAnalysis = "\n\n" + analyzeLoss(chatId, aiResult.side, realSide, aiResult.aiResults, aiResult.confidencePercent);
+                }
 
                 // Update AI logs
                 if (data.last_pred) {
@@ -432,10 +512,11 @@ async function monitoringLoop(chatId) {
                 // Build AI results summary
                 let aiSummary = "";
                 for(let i = 0; i < aiResult.aiResults.length; i++) {
-                    aiSummary += `\n${i+1}. ${aiResult.aiResults[i]}`;
+                    const r = aiResult.aiResults[i];
+                    aiSummary += `\n${i+1}. ${r.name}: ${r.prediction === "Big" ? "🔵" : "🔴"} ${r.prediction}`;
                 }
                 
-                let msg = `🧠 **10-AI VOTING SYSTEM** 🧠\n━━━━━━━━━━━━━━━━━━━━━━\n🐉 Dragon: ${dragonCount} ပွဲဆက်\n🗳️ **Voting Result**\n🔵 BIG: ${aiResult.votes.Big} votes\n🔴 SMALL: ${aiResult.votes.Small} votes\n━━━━━━━━━━━━━━━━━━━━━━\n🎯 **FINAL PREDICTION: ${aiResult.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n📊 Confidence: ${aiResult.confidence} (${aiResult.confidencePercent}%)\n✅ Active AIs: ${aiResult.totalActiveAIs}/10\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 **Individual AI Results**${aiSummary}\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ Time: ${mmTime}\n🕒 ပွဲစဉ်: \`${data.nextIssue?.slice(-5) || "..."}\`\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 **Auto Bet**\n📋 Plan: ${data.betPlan?.join(' → ') || "N/A"}\n🎯 Mode: ${data.autoMode === "martingale" ? "Martingale" : "Trigger"}\n⚡ Status: ${data.autoBetActive ? "ACTIVE ✅" : "STANDBY ⏳"}\n🏆 Stop Limit: ${data.stopLimit} win(s)\n📉 Loss Streak: ${data.consecutiveLosses || 0}`;
+                let msg = `🧠 **10-AI VOTING SYSTEM** 🧠\n━━━━━━━━━━━━━━━━━━━━━━\n📅 ပွဲစဉ်: ${lastRound.issueNumber.slice(-5)}\n🐉 Dragon: ${dragonCount} ပွဲဆက်\n⏰ Time: ${mmTime}\n━━━━━━━━━━━━━━━━━━━━━━\n🗳️ **Voting Result**\n🔵 BIG: ${aiResult.votes.Big} votes\n🔴 SMALL: ${aiResult.votes.Small} votes\n━━━━━━━━━━━━━━━━━━━━━━\n🎯 **FINAL: ${aiResult.side === "Big" ? "ကြီး (BIG) 🔵" : "သေး (SMALL) 🔴"}**\n📊 Confidence: ${aiResult.confidence} (${aiResult.confidencePercent}%)\n✅ Active AIs: ${aiResult.totalActiveAIs}/10\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 **Individual AI Predictions**${aiSummary}\n━━━━━━━━━━━━━━━━━━━━━━\n📊 **Website Result: ${realSide === "Big" ? "ကြီး (BIG) 🔵" : "သေး (SMALL) 🔴"} (${lastRound.number})**\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 **Auto Bet Status**\n📋 Plan: ${data.betPlan.join(' → ')}\n🎯 Mode: ${data.autoMode === "martingale" ? "Martingale" : "Trigger"}\n⚡ Status: ${data.autoBetActive ? "ACTIVE ✅" : "STANDBY ⏳"}\n🏆 Stop Limit: ${data.stopLimit} win(s)\n📉 Loss Streak: ${data.consecutiveLosses || 0}${lossAnalysis}`;
                 
                 await bot.sendMessage(chatId, msg, {
                     reply_markup: { 
@@ -454,7 +535,7 @@ async function monitoringLoop(chatId) {
 // --- Menu ---
 const mainMenu = { 
     reply_markup: { 
-        keyboard: [["📊 Website (100)", "📜 Bet History"], ["📈 AI History", "⚙️ Settings"], ["🚪 Logout"]], 
+        keyboard: [["📊 Website (100)", "📜 Bet History"], ["📈 AI History", "📊 AI Performance"], ["⚙️ Settings", "🚪 Logout"]], 
         resize_keyboard: true 
     } 
 };
@@ -488,7 +569,8 @@ bot.on('message', async (msg) => {
             currentBetStep: 0,
             consecutiveLosses: 0,
             consecutiveWins: 0,
-            autoSide: null
+            autoSide: null,
+            aiPerformance: {}
         };
     }
 
@@ -520,6 +602,11 @@ bot.on('message', async (msg) => {
         const data = user_db[chatId];
         const msg = `⚙️ **Auto Bet Settings**\n━━━━━━━━━━━━━━━━\n📋 Bet Plan: \`${data.betPlan.join(', ')}\`\n🏆 Stop Limit: \`${data.stopLimit}\` win(s)\n💔 Loss Limit: \`${data.lossLimit}\` loss(es)\n🔄 Mode: \`${data.autoMode === "martingale" ? "Martingale" : "Trigger (7 Loss)"}\`\n🤖 Status: ${data.autoBetActive ? "RUNNING ✅" : "STOPPED ❌"}`;
         return bot.sendMessage(chatId, msg, settingsMenu);
+    }
+    
+    if (text === "📊 AI Performance") {
+        const summary = getAIPerformanceSummary(chatId);
+        return bot.sendMessage(chatId, summary);
     }
     
     if (text === "🎲 Set Bet Plan") {
@@ -592,9 +679,13 @@ bot.on('message', async (msg) => {
         } else if (mode === "mode") {
             if (text === "1") {
                 user_db[chatId].autoMode = "martingale";
+                user_db[chatId].autoBetActive = false;
+                user_db[chatId].autoBetStarted = false;
                 bot.sendMessage(chatId, "✅ **Mode: Martingale** - ရှုံးတိုင်း ဆက်ထိုးမယ်");
             } else if (text === "2") {
                 user_db[chatId].autoMode = "trigger";
+                user_db[chatId].autoBetActive = false;
+                user_db[chatId].autoBetStarted = false;
                 bot.sendMessage(chatId, "✅ **Mode: Trigger** - ရှုံး 7 ပွဲပြည့်မှ စထိုးမယ်");
             } else {
                 bot.sendMessage(chatId, "❌ မှားယွင်းနေပါသည်။ **1** သို့မဟုတ် **2** ရိုက်ထည့်ပါ။");
@@ -618,9 +709,10 @@ bot.on('message', async (msg) => {
             currentBetStep: 0,
             consecutiveLosses: 0,
             consecutiveWins: 0,
-            autoSide: null
+            autoSide: null,
+            aiPerformance: {}
         };
-        return bot.sendMessage(chatId, "🤖 **WinGo v90 - 10 AI System**\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🤖 **WinGo v100 - 10 AI Voting System**\n\nအင်္ဂါရပ်များ:\n✅ AI 10 ခု မဲပေးစနစ်\n✅ ရှုံးရင် ဘာကြောင့်မှားတာ ခွဲခြမ်းစိတ်ဖြာ\n✅ AI Performance ခြေရာခံ\n✅ Website result နဲ့ ယှဉ်ပြီး အဖြေမှန်ထုတ်ပေး\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
     }
 
     if (text === "📜 Bet History") {
@@ -636,15 +728,17 @@ bot.on('message', async (msg) => {
     if (text === "📈 AI History") {
         let txt = "📈 **AI Prediction History (30 games)**\n------------------\n";
         user_db[chatId].aiLogs.slice(0, 30).forEach(l => { 
-            txt += `${l.status} | ${l.issue} | Pred: ${l.prediction} | Result: ${l.result} | ${l.confidence}%\n`; 
+            txt += `${l.status} | ${l.issue} | Pred: ${l.prediction === "Big" ? "BIG" : "SMALL"} | Result: ${l.result === "Big" ? "BIG" : "SMALL"} | ${l.confidence}%\n`; 
         });
         return bot.sendMessage(chatId, txt || "No history.");
     }
 
     if (text === "📊 Website (100)") {
         const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, user_db[chatId].token);
-        let list = "📊 **Last 20 Games**\n------------------\n";
-        res?.data?.list?.forEach(i => { list += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number)>=5?'Big':'Small'})\n`; });
+        let list = "📊 **Last 20 Games (Website Result)**\n------------------\n";
+        res?.data?.list?.forEach(i => { 
+            list += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number)>=5 ? 'BIG 🔵' : 'SMALL 🔴'})\n`; 
+        });
         return bot.sendMessage(chatId, list);
     }
 
@@ -661,7 +755,7 @@ bot.on('message', async (msg) => {
             user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
             user_db[chatId].running = true;
             monitoringLoop(chatId);
-            bot.sendMessage(chatId, "✅ Login Success! Monitoring...", mainMenu);
+            bot.sendMessage(chatId, "✅ Login Success! Monitoring with 10 AI System...", mainMenu);
         } else { 
             bot.sendMessage(chatId, "❌ Login Failed!"); 
             user_db[chatId].tempPhone = null; 
