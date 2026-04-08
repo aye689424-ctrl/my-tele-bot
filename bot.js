@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro v3.0 - Full Feature'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro v3.0 - All in One Message'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -215,7 +215,7 @@ async function executeAutoBet(chatId, isWin) {
     }
 }
 
-// --- Monitoring Loop ---
+// --- Monitoring Loop (All in One Message) ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
@@ -228,6 +228,7 @@ async function monitoringLoop(chatId) {
             if (lastRound.issueNumber !== data.last_issue) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
                 let roundProfit = 0;
+                let fullMessage = "";
 
                 // ========== VIP REPORT (Result of previous signal) ==========
                 if (data.last_pred) {
@@ -253,10 +254,9 @@ async function monitoringLoop(chatId) {
                     });
                     data.totalProfit += roundProfit;
                     
-                    // Send VIP Report
+                    // Add VIP Report to message
                     const pnlSign = roundProfit >= 0 ? "+" : "";
-                    const vipMsg = `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${lastRound.issueNumber}\n🎰 Pick   : ${data.last_pred.toUpperCase()}\n🎲 Status : ${statusEmoji} | ${resultText}(${lastRound.number})\n💰 ပွဲစဉ်အမြတ် : **${pnlSign}${roundProfit.toFixed(2)}** MMK\n💵 စုစုပေါင်း : **${data.totalProfit.toFixed(2)}** MMK`;
-                    bot.sendMessage(chatId, vipMsg);
+                    fullMessage += `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${lastRound.issueNumber}\n🎰 Pick   : ${data.last_pred.toUpperCase()}\n🎲 Status : ${statusEmoji} | ${resultText}(${lastRound.number})\n💰 ပွဲစဉ်အမြတ် : **${pnlSign}${roundProfit.toFixed(2)}** MMK\n💵 စုစုပေါင်း : **${data.totalProfit.toFixed(2)}** MMK\n\n`;
                     
                     // Update AI logs
                     data.aiLogs.unshift({ 
@@ -267,13 +267,13 @@ async function monitoringLoop(chatId) {
                     });
                     if (data.aiLogs.length > 50) data.aiLogs.pop();
                     
-                    // Send AI History (20 games)
-                    let historyMsg = `\n📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၂၀ ပွဲ)**\n------------------\n`;
+                    // Add AI History (20 games) to message
+                    fullMessage += `📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၂၀ ပွဲ)**\n------------------\n`;
                     data.aiLogs.slice(0, 20).forEach(l => {
                         const resultText2 = l.result === "Big" ? "Big" : "Small";
-                        historyMsg += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${resultText2}\n`;
+                        fullMessage += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${resultText2}\n`;
                     });
-                    bot.sendMessage(chatId, historyMsg);
+                    fullMessage += `\n`;
                 }
 
                 // ========== AI NEW SIGNAL ==========
@@ -295,7 +295,7 @@ async function monitoringLoop(chatId) {
                     await placeAutoBet(chatId, ai.side, firstAmount, 0);
                 }
 
-                // ========== SEND AI MULTI-BRAIN ANALYSIS ==========
+                // ========== ADD AI MULTI-BRAIN ANALYSIS ==========
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
                 
                 // For display - create brain info like B1:S|B2:B|B3:B
@@ -304,9 +304,10 @@ async function monitoringLoop(chatId) {
                 const patternText = ai.dragon >= 3 ? "Dragon Mode 🐉" : "Brain Voting 🧠";
                 const sideText = ai.side === "Big" ? "ကြီး (BIG)🧑‍💻" : "သေး (SMALL)🧑‍💻";
                 
-                const aiMsg = `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${brainInfo}\`\n🛡 Pattern: \`${patternText}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${sideText}**\n📊 Confidence: \`${confidenceText}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``;
+                fullMessage += `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${brainInfo}\`\n🛡 Pattern: \`${patternText}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${sideText}**\n📊 Confidence: \`${confidenceText}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``;
 
-                await bot.sendMessage(chatId, aiMsg, {
+                // ========== SEND ONE MESSAGE WITH ALL CONTENT + BUTTONS ==========
+                await bot.sendMessage(chatId, fullMessage, {
                     reply_markup: { 
                         inline_keyboard: [[
                             { text: "🔵 Big (ကြီး)", callback_data: "bet_Big" },
@@ -472,7 +473,7 @@ bot.on('message', async (msg) => {
             consecutiveWins: 0,
             autoSide: null
         };
-        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ Pattern-Based AI\n✅ 1-2-3 ကိုက်စနစ်\n✅ တလှည့်စီဖမ်း\n✅ အချိုးအစားပြန်ညီ\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ Pattern-Based AI\n✅ 1-2-3 ကိုက်စနစ်\n✅ တလှည့်စီဖမ်း\n✅ အချိုးအစားပြန်ညီ\n✅ တစ်ခုတည်းသော မက်ဆေ့ခ်ျမှာ အားလုံးပါ\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
     }
 
     if (text === "📜 Bet History") {
@@ -520,7 +521,7 @@ bot.on('message', async (msg) => {
             data.token = res.data.tokenHeader + " " + res.data.token;
             data.running = true;
             monitoringLoop(chatId);
-            bot.sendMessage(chatId, "✅ Login Success! Pattern-Based AI Active...", mainMenu);
+            bot.sendMessage(chatId, "✅ Login Success! All-in-One Message Active...", mainMenu);
         } else { 
             bot.sendMessage(chatId, "❌ Login Failed!"); 
             data.tempPhone = null; 
