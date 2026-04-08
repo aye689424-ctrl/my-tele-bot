@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro v3.0 - Pattern Based'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro v3.0 - Full Feature'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -67,7 +67,6 @@ function runAI(history) {
     const smallCount = 20 - bigCount;
     
     let prediction = null;
-    let reason = "";
     
     // Rule 1: Streak Based
     if(streak === 1) {
@@ -216,7 +215,7 @@ async function executeAutoBet(chatId, isWin) {
     }
 }
 
-// --- Monitoring Loop (ပုံစံအတိုင်း) ---
+// --- Monitoring Loop ---
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
@@ -234,6 +233,7 @@ async function monitoringLoop(chatId) {
                 if (data.last_pred) {
                     const isWin = data.last_pred === realSide;
                     const statusEmoji = isWin ? "အနိုင်ရရှိသည်🏆" : "ရှုံးနိမ့်သည်💔";
+                    const resultText = realSide === "Big" ? "Big" : "Small";
                     
                     // Update bet history
                     data.betHistory.forEach(bet => {
@@ -255,7 +255,7 @@ async function monitoringLoop(chatId) {
                     
                     // Send VIP Report
                     const pnlSign = roundProfit >= 0 ? "+" : "";
-                    const vipMsg = `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${lastRound.issueNumber}\n🎰 Pick   : ${data.last_pred.toUpperCase()} (${lastRound.number})\n🎲 Status : ${statusEmoji} | ${realSide.toUpperCase()}(${lastRound.number})\n💰 ပွဲစဉ်အမြတ် : **${pnlSign}${roundProfit.toFixed(2)}** MMK\n💵 စုစုပေါင်း : **${data.totalProfit.toFixed(2)}** MMK`;
+                    const vipMsg = `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${lastRound.issueNumber}\n🎰 Pick   : ${data.last_pred.toUpperCase()}\n🎲 Status : ${statusEmoji} | ${resultText}(${lastRound.number})\n💰 ပွဲစဉ်အမြတ် : **${pnlSign}${roundProfit.toFixed(2)}** MMK\n💵 စုစုပေါင်း : **${data.totalProfit.toFixed(2)}** MMK`;
                     bot.sendMessage(chatId, vipMsg);
                     
                     // Update AI logs
@@ -266,6 +266,14 @@ async function monitoringLoop(chatId) {
                         prediction: data.last_pred
                     });
                     if (data.aiLogs.length > 50) data.aiLogs.pop();
+                    
+                    // Send AI History (20 games)
+                    let historyMsg = `\n📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၂၀ ပွဲ)**\n------------------\n`;
+                    data.aiLogs.slice(0, 20).forEach(l => {
+                        const resultText2 = l.result === "Big" ? "Big" : "Small";
+                        historyMsg += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${resultText2}\n`;
+                    });
+                    bot.sendMessage(chatId, historyMsg);
                 }
 
                 // ========== AI NEW SIGNAL ==========
@@ -287,12 +295,18 @@ async function monitoringLoop(chatId) {
                     await placeAutoBet(chatId, ai.side, firstAmount, 0);
                 }
 
-                // ========== SEND AI ANALYSIS (ပုံစံအတိုင်း) ==========
+                // ========== SEND AI MULTI-BRAIN ANALYSIS ==========
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
                 
-                const nextMsg = `🚀 **AI Signal Analysis**\n━━━━━━━━━━━━━━━━\n📚တွက်ချက်ပုံစံ: \`${ai.calc}\`\n🧠 Pattern: \`${ai.pattern}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${ai.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n📊 Confidence: \`95%\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``;
+                // For display - create brain info like B1:S|B2:B|B3:B
+                const brainInfo = `B1:${ai.side.charAt(0)}|B2:${ai.side.charAt(0)}|B3:${ai.side === "Big" ? "S" : "B"}`;
+                const confidenceText = ai.dragon >= 3 ? "HIGH 🔥" : "NORMAL ⚡";
+                const patternText = ai.dragon >= 3 ? "Dragon Mode 🐉" : "Brain Voting 🧠";
+                const sideText = ai.side === "Big" ? "ကြီး (BIG)🧑‍💻" : "သေး (SMALL)🧑‍💻";
+                
+                const aiMsg = `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${brainInfo}\`\n🛡 Pattern: \`${patternText}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${sideText}**\n📊 Confidence: \`${confidenceText}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``;
 
-                await bot.sendMessage(chatId, nextMsg, {
+                await bot.sendMessage(chatId, aiMsg, {
                     reply_markup: { 
                         inline_keyboard: [[
                             { text: "🔵 Big (ကြီး)", callback_data: "bet_Big" },
