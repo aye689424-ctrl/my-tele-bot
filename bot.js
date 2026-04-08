@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const http = require('http');
 
 // Render Alive Fix
-http.createServer((req, res) => { res.end('WinGo v81: Detailed Profit Tracker'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v81: Multi-Brain System'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -39,16 +39,44 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// --- 🧠 AI Signal Logic ---
+// --- 🧠 Multi-Brain AI Signal Logic ---
 function runAI(history) {
     const resArr = history.map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
-    const last3 = resArr.slice(0, 3).reverse().join('-');
     const last = resArr[0];
+
+    // Brain 1: Pattern Hunter (Mirror/Repeat)
+    let b1_side = (resArr[0] === resArr[2]) ? (resArr[1] === "Big" ? "Small" : "Big") : (resArr[0] === "Big" ? "Small" : "Big");
+
+    // Brain 2: Dragon Follower 🐉
     let dragon = 1;
-    for(let i=0; i<resArr.length-1; i++) { if(resArr[i] === resArr[i+1]) dragon++; else break; }
-    let side = (dragon >= 3) ? last : (last === "Big" ? "Small" : "Big");
-    let pattern = (dragon >= 3) ? "Dragon Follow 🐉" : "Trend Mirror 🔄";
-    return { side, dragon, calc: last3, pattern };
+    for(let i=0; i<resArr.length-1; i++) { 
+        if(resArr[i] === resArr[i+1]) dragon++; 
+        else break; 
+    }
+    let b2_side = (dragon >= 3) ? last : (last === "Big" ? "Small" : "Big");
+
+    // Brain 3: Probability Logic (Freq)
+    let bigs = resArr.slice(0, 10).filter(x => x === "Big").length;
+    let b3_side = bigs >= 6 ? "Small" : "Big";
+
+    // --- Voting System ---
+    let votes = { Big: 0, Small: 0 };
+    votes[b1_side]++;
+    votes[b2_side]++;
+    votes[b3_side]++;
+
+    let finalSide = votes.Big > votes.Small ? "Big" : "Small";
+    let confidence = votes[finalSide] === 3 ? "HIGH 🔥" : "NORMAL ⚡";
+    let patternTxt = (dragon >= 3) ? "Dragon Mode 🐉" : "Brain Voting 🧠";
+
+    return { 
+        side: finalSide, 
+        dragon: dragon, 
+        calc: `${resArr[2].charAt(0)}-${resArr[1].charAt(0)}-${resArr[0].charAt(0)}`, 
+        pattern: patternTxt,
+        confidence: confidence,
+        brainInfo: `B1:${b1_side.charAt(0)}|B2:${b2_side.charAt(0)}|B3:${b3_side.charAt(0)}`
+    };
 }
 
 // --- 🚀 Monitoring & Display Loop ---
@@ -66,7 +94,6 @@ async function monitoringLoop(chatId) {
                 let autoMsg = "";
                 let roundProfit = 0;
 
-                // 1. Result & Pending Update with Individual Profit
                 if (data.last_pred) {
                     const isWin = data.last_pred === realSide;
                     const statusEmoji = isWin ? "အနိုင်ရရှိသည်🏆" : "ရှုံးနိမ့်သည်💔";
@@ -74,16 +101,15 @@ async function monitoringLoop(chatId) {
                     data.aiLogs.unshift({ status: isWin ? "✅" : "❌", issue: lastRound.issueNumber.slice(-3), result: realSide });
                     if (data.aiLogs.length > 50) data.aiLogs.pop();
 
-                    // Bet History Update & Profit Calculation
                     data.betHistory.forEach(bet => {
                         if (bet.issue === lastRound.issueNumber.slice(-5) && bet.status === "⏳ Pending") {
                             if (bet.side === realSide) {
                                 bet.status = "✅ WIN";
-                                bet.pnl = +(bet.amount * 0.96).toFixed(2); // အသားတင်အမြတ်
+                                bet.pnl = +(bet.amount * 0.96).toFixed(2);
                                 roundProfit += bet.pnl;
                             } else {
                                 bet.status = "❌ LOSS";
-                                bet.pnl = -bet.amount; // အရင်းအရှုံး
+                                bet.pnl = -bet.amount;
                                 roundProfit += bet.pnl;
                             }
                         }
@@ -98,14 +124,13 @@ async function monitoringLoop(chatId) {
                     autoMsg += `\n`;
                 }
 
-                // 2. New Signal
                 const ai = runAI(history);
                 data.last_issue = lastRound.issueNumber;
                 data.nextIssue = (BigInt(lastRound.issueNumber) + 1n).toString();
                 data.last_pred = ai.side;
 
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
-                const nextMsg = `🚀 **AI Signal Analysis**\n━━━━━━━━━━━━━━━━\n📚တွက်ချက်ပုံစံ: \`${ai.calc}\`\n🧠 Pattern: \`${ai.pattern}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${ai.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}🧑‍💻**\n📊 Confidence: \`95%\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``;
+                const nextMsg = `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${ai.brainInfo}\`\n🛡 Pattern: \`${ai.pattern}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${ai.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}🧑‍💻**\n📊 Confidence: \`${ai.confidence}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\``;
 
                 await bot.sendMessage(chatId, (autoMsg + nextMsg), {
                     reply_markup: { 
@@ -175,7 +200,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, list);
     }
 
-    // Login Logic
     if (/^\d{9,11}$/.test(text) && !user_db[chatId].token) {
         user_db[chatId].tempPhone = text; return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
     }
