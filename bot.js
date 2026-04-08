@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
-http.createServer((req, res) => { res.end('WinGo v81: Stop Limit Fixed'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo v90: 10 AI Brain System'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -38,25 +38,180 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// --- Multi-Brain AI ---
-function runAI(history) {
-    const resArr = history.map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
-    const last = resArr[0];
-    let b1_side = (resArr[0] === resArr[2]) ? (resArr[1] === "Big" ? "Small" : "Big") : (resArr[0] === "Big" ? "Small" : "Big");
-    let dragon = 1;
-    for(let i=0; i<resArr.length-1; i++) { 
-        if(resArr[i] === resArr[i+1]) dragon++; 
-        else break; 
+// ========== 🧠 10 AI BRAIN SYSTEM ==========
+
+function getHistoryArray(history) {
+    return history.map(i => (parseInt(i.number) >= 5 ? "Big" : "Small"));
+}
+
+// AI 1: Pattern Hunter (နောက်ဆုံး 3 ပွဲ pattern)
+function aiPatternHunter(historyArr) {
+    if (historyArr.length < 3) return null;
+    const last3 = historyArr.slice(0, 3);
+    // Pattern: A-B-A ဆိုရင် B ရဲ့ဆန့်ကျင်ဘက်
+    if (last3[0] === last3[2]) {
+        return last3[1] === "Big" ? "Small" : "Big";
     }
-    let b2_side = (dragon >= 3) ? last : (last === "Big" ? "Small" : "Big");
-    let bigs = resArr.slice(0, 10).filter(x => x === "Big").length;
-    let b3_side = bigs >= 6 ? "Small" : "Big";
+    // Pattern: A-A-B ဆိုရင် B အတိုင်း
+    if (last3[0] === last3[1]) {
+        return last3[2];
+    }
+    return null;
+}
+
+// AI 2: Dragon Follower (ဆက်တိုက်ကြီး/သေး)
+function aiDragonFollower(historyArr) {
+    let dragon = 1;
+    for(let i = 0; i < historyArr.length - 1; i++) {
+        if(historyArr[i] === historyArr[i+1]) dragon++;
+        else break;
+    }
+    if(dragon >= 3) return historyArr[0]; // ဆက်ထိုး
+    return null; // မသေချာရင် null
+}
+
+// AI 3: Probability Master (၁၀ ပွဲအချိုး)
+function aiProbabilityMaster(historyArr) {
+    const last10 = historyArr.slice(0, 10);
+    const bigCount = last10.filter(x => x === "Big").length;
+    if(bigCount >= 6) return "Small";
+    if(bigCount <= 4) return "Big";
+    return null;
+}
+
+// AI 4: Alternation Detector (တလှည့်စီကျလား)
+function aiAlternationDetector(historyArr) {
+    if(historyArr.length < 4) return null;
+    let isAlternating = true;
+    for(let i = 0; i < 3; i++) {
+        if(historyArr[i] === historyArr[i+1]) {
+            isAlternating = false;
+            break;
+        }
+    }
+    if(isAlternating) {
+        // တလှည့်စီကျနေရင် နောက်တစ်လှည့် ဆန့်ကျင်ဘက်
+        return historyArr[0] === "Big" ? "Small" : "Big";
+    }
+    return null;
+}
+
+// AI 5: Smart Reversal (၃ ပွဲဆက်တူရင် ပြောင်း)
+function aiSmartReversal(historyArr) {
+    if(historyArr.length < 3) return null;
+    if(historyArr[0] === historyArr[1] && historyArr[1] === historyArr[2]) {
+        return historyArr[0] === "Big" ? "Small" : "Big";
+    }
+    return null;
+}
+
+// AI 6: Momentum Tracker (နောက်ဆုံး ၅ ပွဲ momentum)
+function aiMomentumTracker(historyArr) {
+    const last5 = historyArr.slice(0, 5);
+    const bigCount = last5.filter(x => x === "Big").length;
+    if(bigCount >= 4) return "Big";
+    if(bigCount <= 1) return "Small";
+    return null;
+}
+
+// AI 7: Fibonacci Pattern
+function aiFibonacciPattern(historyArr) {
+    // Fibonacci အလိုက် 1,2,3,5,8 ပွဲအလိုက် pattern
+    if(historyArr.length < 8) return null;
+    const positions = [1, 2, 3, 5, 8];
+    let bigVotes = 0, smallVotes = 0;
+    for(let pos of positions) {
+        if(historyArr[pos-1] === "Big") bigVotes++;
+        else smallVotes++;
+    }
+    if(bigVotes > smallVotes) return "Big";
+    if(smallVotes > bigVotes) return "Small";
+    return null;
+}
+
+// AI 8: Gap Analyzer (Big/Small ကွာဟချက်)
+function aiGapAnalyzer(historyArr) {
+    const last20 = historyArr.slice(0, 20);
+    const bigCount = last20.filter(x => x === "Big").length;
+    const smallCount = 20 - bigCount;
+    const gap = Math.abs(bigCount - smallCount);
+    if(gap >= 6) {
+        // ကွာဟမှုများနေရင် နည်းတဲ့ဘက်ကို ပြန်လာ
+        return bigCount > smallCount ? "Small" : "Big";
+    }
+    return null;
+}
+
+// AI 9: Trend Extender (လက်ရှိ trend အတိုင်း)
+function aiTrendExtender(historyArr) {
+    if(historyArr.length < 3) return null;
+    if(historyArr[0] === historyArr[1] && historyArr[1] === historyArr[2]) {
+        return historyArr[0]; // trend ဆက်ထိုး
+    }
+    return null;
+}
+
+// AI 10: Contrarian (လူအများစုရဲ့ဆန့်ကျင်ဘက်)
+function aiContrarian(historyArr) {
+    const last10 = historyArr.slice(0, 10);
+    const bigCount = last10.filter(x => x === "Big").length;
+    // လူအများစုထိုးမယ့်ဘက်ကို ဆန့်ကျင်
+    if(bigCount >= 7) return "Small";
+    if(bigCount <= 3) return "Big";
+    return null;
+}
+
+// 🗳️ Voting System with Weight
+function votingSystem(historyArr) {
+    const ais = [
+        { name: "Pattern Hunter", func: aiPatternHunter, weight: 2 },
+        { name: "Dragon Follower", func: aiDragonFollower, weight: 2 },
+        { name: "Probability Master", func: aiProbabilityMaster, weight: 1 },
+        { name: "Alternation Detector", func: aiAlternationDetector, weight: 1 },
+        { name: "Smart Reversal", func: aiSmartReversal, weight: 2 },
+        { name: "Momentum Tracker", func: aiMomentumTracker, weight: 1 },
+        { name: "Fibonacci Pattern", func: aiFibonacciPattern, weight: 1 },
+        { name: "Gap Analyzer", func: aiGapAnalyzer, weight: 1 },
+        { name: "Trend Extender", func: aiTrendExtender, weight: 2 },
+        { name: "Contrarian", func: aiContrarian, weight: 1 }
+    ];
+    
     let votes = { Big: 0, Small: 0 };
-    votes[b1_side]++; votes[b2_side]++; votes[b3_side]++;
+    let aiResults = [];
+    
+    for(let ai of ais) {
+        const prediction = ai.func(historyArr);
+        if(prediction) {
+            votes[prediction] += ai.weight;
+            aiResults.push(`${ai.name}: ${prediction} (w${ai.weight})`);
+        } else {
+            aiResults.push(`${ai.name}: Pass`);
+        }
+    }
+    
     let finalSide = votes.Big > votes.Small ? "Big" : "Small";
-    let confidence = votes[finalSide] === 3 ? "HIGH 🔥" : "NORMAL ⚡";
-    let patternTxt = (dragon >= 3) ? "Dragon Mode 🐉" : "Brain Voting 🧠";
-    return { side: finalSide, dragon: dragon, pattern: patternTxt, confidence: confidence, brainInfo: `B1:${b1_side.charAt(0)}|B2:${b2_side.charAt(0)}|B3:${b3_side.charAt(0)}` };
+    let totalVotes = votes.Big + votes.Small;
+    let confidencePercent = totalVotes > 0 ? Math.round((votes[finalSide] / totalVotes) * 100) : 50;
+    let confidenceLevel = confidencePercent >= 70 ? "HIGH 🔥" : (confidencePercent >= 55 ? "MEDIUM ⚡" : "LOW ⚠️");
+    
+    return {
+        side: finalSide,
+        votes: votes,
+        confidence: confidenceLevel,
+        confidencePercent: confidencePercent,
+        aiResults: aiResults,
+        totalActiveAIs: aiResults.filter(r => !r.includes("Pass")).length
+    };
+}
+
+// --- Dragon detection for display
+function getDragonCount(historyArr) {
+    let dragon = 1;
+    for(let i = 0; i < historyArr.length - 1; i++) {
+        if(historyArr[i] === historyArr[i+1]) dragon++;
+        else break;
+    }
+    return dragon;
 }
 
 // --- Auto Bet Function ---
@@ -108,19 +263,17 @@ async function placeAutoBet(chatId, side, amount, stepIndex) {
     }
 }
 
-// --- Execute Auto Bet Logic (STOP LIMIT FIXED) ---
+// --- Execute Auto Bet Logic ---
 async function executeAutoBet(chatId, isWin) {
     const data = user_db[chatId];
     if (!data.autoBetActive) return;
     
     if (isWin) {
-        // WIN: Increase consecutive wins count
         data.consecutiveWins++;
         data.consecutiveLosses = 0;
         
         bot.sendMessage(chatId, `✅ Auto Bet WIN! (${data.consecutiveWins}/${data.stopLimit} wins needed to stop)`);
         
-        // Check if stop limit reached
         if (data.consecutiveWins >= data.stopLimit) {
             bot.sendMessage(chatId, `🛑 **Stop Limit Reached!** (${data.stopLimit} wins)\nAuto Bet Stopped.`);
             data.autoBetActive = false;
@@ -130,17 +283,13 @@ async function executeAutoBet(chatId, isWin) {
             return;
         }
         
-        // Reset bet step after win (start from step 0 again)
         data.currentBetStep = 0;
-        
-        // Continue auto betting with step 0 (first amount)
         const nextAmount = data.betPlan[0];
-        bot.sendMessage(chatId, `📈 WIN! Continuing auto bet with ${nextAmount} MMK (Step 1/${data.betPlan.length})`);
+        bot.sendMessage(chatId, `📈 WIN! Continuing with ${nextAmount} MMK`);
         const success = await placeAutoBet(chatId, data.autoSide, nextAmount, 0);
         if (!success) {
             data.autoBetActive = false;
             data.autoBetStarted = false;
-            bot.sendMessage(chatId, `❌ Auto Bet Stopped due to error.`);
         }
         return;
     }
@@ -152,36 +301,32 @@ async function executeAutoBet(chatId, isWin) {
     bot.sendMessage(chatId, `❌ Auto Bet LOSS! (Loss streak: ${data.consecutiveLosses})`);
     
     if (data.autoMode === "martingale") {
-        // Martingale: bet next step after loss
         const nextStep = data.currentBetStep + 1;
         
         if (nextStep < data.betPlan.length) {
             data.currentBetStep = nextStep;
             const nextAmount = data.betPlan[data.currentBetStep];
-            bot.sendMessage(chatId, `📉 LOSS! Next auto bet: ${data.autoSide} | ${nextAmount} MMK (Step ${data.currentBetStep+1}/${data.betPlan.length})`);
+            bot.sendMessage(chatId, `📉 LOSS! Next: ${data.autoSide} | ${nextAmount} MMK (Step ${data.currentBetStep+1}/${data.betPlan.length})`);
             
             const success = await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
             if (!success) {
                 data.autoBetActive = false;
                 data.autoBetStarted = false;
-                bot.sendMessage(chatId, `❌ Auto Bet Stopped due to error.`);
             }
         } else {
-            bot.sendMessage(chatId, `❌ Max bet step reached (${data.betPlan.length} steps)! Auto Bet Stopped.`);
+            bot.sendMessage(chatId, `❌ Max bet step reached! Auto Bet Stopped.`);
             data.autoBetActive = false;
             data.autoBetStarted = false;
             data.currentBetStep = 0;
-            data.consecutiveWins = 0;
         }
     }
     else if (data.autoMode === "trigger") {
-        // Trigger mode: only start after 7 losses
         if (data.consecutiveLosses >= 7 && !data.autoBetActive && !data.autoBetStarted) {
             data.autoBetActive = true;
             data.autoBetStarted = true;
             data.currentBetStep = 0;
             const firstAmount = data.betPlan[0];
-            bot.sendMessage(chatId, `⚠️ 7 Consecutive Losses! Starting Auto Bet: ${data.autoSide} | ${firstAmount} MMK`);
+            bot.sendMessage(chatId, `⚠️ 7 Losses! Starting Auto Bet: ${data.autoSide} | ${firstAmount} MMK`);
             const success = await placeAutoBet(chatId, data.autoSide, firstAmount, 0);
             if (!success) {
                 data.autoBetActive = false;
@@ -218,6 +363,7 @@ async function monitoringLoop(chatId) {
         if (res?.msgCode === 0 && res.data?.list?.length > 0) {
             const history = res.data.list;
             const lastRound = history[0];
+            const historyArr = getHistoryArray(history);
 
             if (lastRound.issueNumber !== data.last_issue) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
@@ -245,21 +391,26 @@ async function monitoringLoop(chatId) {
                     data.totalProfit += roundProfit;
                 }
 
-                // AI Prediction
-                const ai = runAI(history);
-                data.last_issue = lastRound.issueNumber;
-                data.nextIssue = (BigInt(lastRound.issueNumber) + 1n).toString();
-                data.autoSide = ai.side;
-                data.last_pred = ai.side;
+                // 🧠 Run 10 AI Voting System
+                const aiResult = votingSystem(historyArr);
+                const dragonCount = getDragonCount(historyArr);
+                data.autoSide = aiResult.side;
+                data.last_pred = aiResult.side;
 
                 // Update AI logs
                 if (data.last_pred) {
                     const isWin = data.last_pred === realSide;
-                    data.aiLogs.unshift({ status: isWin ? "✅" : "❌", issue: lastRound.issueNumber.slice(-3), result: realSide });
+                    data.aiLogs.unshift({ 
+                        status: isWin ? "✅" : "❌", 
+                        issue: lastRound.issueNumber.slice(-3), 
+                        result: realSide,
+                        prediction: data.last_pred,
+                        confidence: aiResult.confidencePercent
+                    });
                     if (data.aiLogs.length > 50) data.aiLogs.pop();
                 }
 
-                // Start Martingale Auto Bet (only if not active and no pending)
+                // Start Martingale Auto Bet
                 const hasPendingAuto = data.betHistory.some(b => b.status === "⏳ Pending" && b.isAuto);
                 if (data.autoMode === "martingale" && data.autoBetActive && !hasPendingAuto && !data.autoBetStarted) {
                     data.autoBetStarted = true;
@@ -267,20 +418,24 @@ async function monitoringLoop(chatId) {
                     data.consecutiveLosses = 0;
                     data.consecutiveWins = 0;
                     const firstAmount = data.betPlan[0];
-                    bot.sendMessage(chatId, `🤖 Starting Martingale: ${ai.side} | ${firstAmount} MMK\nStop Limit: ${data.stopLimit} win(s) to stop`);
-                    const success = await placeAutoBet(chatId, ai.side, firstAmount, 0);
+                    bot.sendMessage(chatId, `🤖 Starting Martingale: ${aiResult.side} | ${firstAmount} MMK`);
+                    const success = await placeAutoBet(chatId, aiResult.side, firstAmount, 0);
                     if (!success) {
                         data.autoBetActive = false;
                         data.autoBetStarted = false;
                     }
                 }
 
-                // Send message
+                // Send message with AI details
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
-                let modeText = data.autoMode === "martingale" ? "Martingale (Loss→Bet)" : "Trigger (7 Loss→Bet)";
-                let autoStatus = data.autoBetActive ? "ACTIVE ✅" : "STANDBY ⏳";
                 
-                let msg = `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${ai.brainInfo}\`\n🛡 Pattern: \`${ai.pattern}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း: **${ai.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n📊 Confidence: \`${ai.confidence}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\`\n━━━━━━━━━━━━━━━━\n🤖 **Auto Bet Settings**\n📋 Bet Plan: \`${data.betPlan.join(' → ')}\`\n🎯 Mode: ${modeText}\n⚡ Status: ${autoStatus}\n🏆 Stop Limit: ${data.stopLimit} win(s) to stop\n📉 Loss Streak: ${data.consecutiveLosses || 0}\n✅ Win Streak: ${data.consecutiveWins || 0}\n🔢 Current Step: ${data.currentBetStep+1}/${data.betPlan.length}`;
+                // Build AI results summary
+                let aiSummary = "";
+                for(let i = 0; i < aiResult.aiResults.length; i++) {
+                    aiSummary += `\n${i+1}. ${aiResult.aiResults[i]}`;
+                }
+                
+                let msg = `🧠 **10-AI VOTING SYSTEM** 🧠\n━━━━━━━━━━━━━━━━━━━━━━\n🐉 Dragon: ${dragonCount} ပွဲဆက်\n🗳️ **Voting Result**\n🔵 BIG: ${aiResult.votes.Big} votes\n🔴 SMALL: ${aiResult.votes.Small} votes\n━━━━━━━━━━━━━━━━━━━━━━\n🎯 **FINAL PREDICTION: ${aiResult.side === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}**\n📊 Confidence: ${aiResult.confidence} (${aiResult.confidencePercent}%)\n✅ Active AIs: ${aiResult.totalActiveAIs}/10\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 **Individual AI Results**${aiSummary}\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ Time: ${mmTime}\n🕒 ပွဲစဉ်: \`${data.nextIssue?.slice(-5) || "..."}\`\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 **Auto Bet**\n📋 Plan: ${data.betPlan?.join(' → ') || "N/A"}\n🎯 Mode: ${data.autoMode === "martingale" ? "Martingale" : "Trigger"}\n⚡ Status: ${data.autoBetActive ? "ACTIVE ✅" : "STANDBY ⏳"}\n🏆 Stop Limit: ${data.stopLimit} win(s)\n📉 Loss Streak: ${data.consecutiveLosses || 0}`;
                 
                 await bot.sendMessage(chatId, msg, {
                     reply_markup: { 
@@ -363,18 +518,18 @@ bot.on('message', async (msg) => {
     // Settings commands
     if (text === "⚙️ Settings") {
         const data = user_db[chatId];
-        const msg = `⚙️ **Auto Bet Settings**\n━━━━━━━━━━━━━━━━\n📋 Bet Plan: \`${data.betPlan.join(', ')}\`\n🏆 Stop Limit: \`${data.stopLimit}\` win(s)\n💔 Loss Limit: \`${data.lossLimit}\` loss(es)\n🔄 Mode: \`${data.autoMode === "martingale" ? "Martingale (Loss→Bet)" : "Trigger (7 Loss→Bet)"}\`\n🤖 Status: ${data.autoBetActive ? "RUNNING ✅" : "STOPPED ❌"}\n📉 Current Loss Streak: ${data.consecutiveLosses}`;
+        const msg = `⚙️ **Auto Bet Settings**\n━━━━━━━━━━━━━━━━\n📋 Bet Plan: \`${data.betPlan.join(', ')}\`\n🏆 Stop Limit: \`${data.stopLimit}\` win(s)\n💔 Loss Limit: \`${data.lossLimit}\` loss(es)\n🔄 Mode: \`${data.autoMode === "martingale" ? "Martingale" : "Trigger (7 Loss)"}\`\n🤖 Status: ${data.autoBetActive ? "RUNNING ✅" : "STOPPED ❌"}`;
         return bot.sendMessage(chatId, msg, settingsMenu);
     }
     
     if (text === "🎲 Set Bet Plan") {
         user_db[chatId].settingMode = "betplan";
-        return bot.sendMessage(chatId, "📝 Bet Plan ထည့်ပါ (comma separated)\n\nဥပမာ: 10,30,90,170,610,1800,3800,6000\n\nသို့မဟုတ်: 10,30,90");
+        return bot.sendMessage(chatId, "📝 Bet Plan ထည့်ပါ (comma separated)\n\nဥပမာ: 10,30,90,170,610,1800,3800,6000");
     }
     
     if (text === "🛑 Set Stop Limit") {
         user_db[chatId].settingMode = "stoplimit";
-        return bot.sendMessage(chatId, "🏆 Stop Limit ထည့်ပါ (အနိုင်ပွဲအရေအတွက်)\n\nဥပမာ: 1 ဆိုရင် 1 ပွဲအနိုင်ရရင် ရပ်မယ်\n2 ဆိုရင် 2 ပွဲဆက်နိုင်မှ ရပ်မယ်");
+        return bot.sendMessage(chatId, "🏆 Stop Limit ထည့်ပါ (အနိုင်ပွဲအရေအတွက်)\n\n1 = 1 ပွဲအနိုင်ရရင် ရပ်\n2 = 2 ပွဲဆက်နိုင်မှ ရပ်");
     }
     
     if (text === "⚠️ Set Loss Limit") {
@@ -393,7 +548,7 @@ bot.on('message', async (msg) => {
         user_db[chatId].currentBetStep = 0;
         user_db[chatId].consecutiveLosses = 0;
         user_db[chatId].consecutiveWins = 0;
-        bot.sendMessage(chatId, `✅ Auto Bet Started!\n\nMode: ${user_db[chatId].autoMode === "martingale" ? "Martingale" : "Trigger (7 Loss)"}\nBet Plan: ${user_db[chatId].betPlan.join(' → ')}\nStop Limit: ${user_db[chatId].stopLimit} win(s) to stop\n\n⏳ Next AI signal ကျမှ စထိုးပါမည်။`, mainMenu);
+        bot.sendMessage(chatId, `✅ Auto Bet Started!\n\nMode: ${user_db[chatId].autoMode === "martingale" ? "Martingale" : "Trigger (7 Loss)"}\nBet Plan: ${user_db[chatId].betPlan.join(' → ')}\nStop Limit: ${user_db[chatId].stopLimit} win(s)\n\n⏳ Next AI signal ကျမှ စထိုးပါမည်။`, mainMenu);
     }
     
     if (text === "❌ Stop Auto Bet") {
@@ -437,16 +592,12 @@ bot.on('message', async (msg) => {
         } else if (mode === "mode") {
             if (text === "1") {
                 user_db[chatId].autoMode = "martingale";
-                user_db[chatId].autoBetActive = false;
-                user_db[chatId].autoBetStarted = false;
-                bot.sendMessage(chatId, "✅ **Mode changed to: Martingale Mode**\n\nရှုံးတိုင်း Bet Plan အတိုင်း ဆက်ထိုးပါမည်။\n\n✅ Start Auto Bet နှိပ်ပါ။");
+                bot.sendMessage(chatId, "✅ **Mode: Martingale** - ရှုံးတိုင်း ဆက်ထိုးမယ်");
             } else if (text === "2") {
                 user_db[chatId].autoMode = "trigger";
-                user_db[chatId].autoBetActive = false;
-                user_db[chatId].autoBetStarted = false;
-                bot.sendMessage(chatId, "✅ **Mode changed to: Trigger Mode**\n\nရှုံး 7 ပွဲပြည့်မှ စထိုးပါမည်။\n\n✅ Start Auto Bet နှိပ်ပါ။");
+                bot.sendMessage(chatId, "✅ **Mode: Trigger** - ရှုံး 7 ပွဲပြည့်မှ စထိုးမယ်");
             } else {
-                bot.sendMessage(chatId, "❌ **မှားယွင်းနေပါသည်။**\n\nကျေးဇူးပြု၍ **1** (Martingale) သို့မဟုတ် **2** (Trigger Mode) ရိုက်ထည့်ပါ။");
+                bot.sendMessage(chatId, "❌ မှားယွင်းနေပါသည်။ **1** သို့မဟုတ် **2** ရိုက်ထည့်ပါ။");
                 return;
             }
         }
@@ -469,28 +620,30 @@ bot.on('message', async (msg) => {
             consecutiveWins: 0,
             autoSide: null
         };
-        return bot.sendMessage(chatId, "🤖 **WinGo VIP Master v81.0**\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🤖 **WinGo v90 - 10 AI System**\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
     }
 
     if (text === "📜 Bet History") {
-        let txt = `📜 **နိုင်/ရှုံး အသေးစိတ်မှတ်တမ်း**\n💰 စုစုပေါင်းအမြတ်: **${user_db[chatId].totalProfit.toFixed(2)}** MMK\n------------------\n`;
+        let txt = `📜 **Bet History**\n💰 Total: **${user_db[chatId].totalProfit.toFixed(2)}** MMK\n------------------\n`;
         user_db[chatId].betHistory.slice(0, 20).forEach(h => { 
             const autoTag = h.isAuto ? "[AUTO]" : "[MANUAL]";
             const pnlTxt = h.status === "⏳ Pending" ? "" : ` (${h.pnl >= 0 ? "+" : ""}${h.pnl})`;
-            txt += `${h.status} ${autoTag} | ပွဲ: ${h.issue} | ${h.side} | ${h.amount} ${pnlTxt}\n`; 
+            txt += `${h.status} ${autoTag} | ${h.issue} | ${h.side} | ${h.amount} ${pnlTxt}\n`; 
         });
-        return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိပါ။");
+        return bot.sendMessage(chatId, txt || "No history.");
     }
 
     if (text === "📈 AI History") {
-        let txt = "📈 **AI ခန့်မှန်းချက် မှတ်တမ်း (၅၀ ပွဲ)**\n------------------\n";
-        user_db[chatId].aiLogs.slice(0, 30).forEach(l => { txt += `${l.status} ပွဲ: ${l.issue} | ရလဒ်: ${l.result}\n`; });
-        return bot.sendMessage(chatId, txt || "မှတ်တမ်းမရှိပါ။");
+        let txt = "📈 **AI Prediction History (30 games)**\n------------------\n";
+        user_db[chatId].aiLogs.slice(0, 30).forEach(l => { 
+            txt += `${l.status} | ${l.issue} | Pred: ${l.prediction} | Result: ${l.result} | ${l.confidence}%\n`; 
+        });
+        return bot.sendMessage(chatId, txt || "No history.");
     }
 
     if (text === "📊 Website (100)") {
         const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, user_db[chatId].token);
-        let list = "📊 **ဂိမ်းရလဒ် ၂၀ ပွဲ**\n------------------\n";
+        let list = "📊 **Last 20 Games**\n------------------\n";
         res?.data?.list?.forEach(i => { list += `🔹 ${i.issueNumber.slice(-3)} ➔ ${i.number} (${parseInt(i.number)>=5?'Big':'Small'})\n`; });
         return bot.sendMessage(chatId, list);
     }
@@ -508,9 +661,9 @@ bot.on('message', async (msg) => {
             user_db[chatId].token = res.data.tokenHeader + " " + res.data.token;
             user_db[chatId].running = true;
             monitoringLoop(chatId);
-            bot.sendMessage(chatId, "✅ Login အောင်မြင်သည်။ VIP Signal စောင့်ကြည့်နေပါသည်-", mainMenu);
+            bot.sendMessage(chatId, "✅ Login Success! Monitoring...", mainMenu);
         } else { 
-            bot.sendMessage(chatId, "❌ Login မှားယွင်းသည်။"); 
+            bot.sendMessage(chatId, "❌ Login Failed!"); 
             user_db[chatId].tempPhone = null; 
         }
     }
