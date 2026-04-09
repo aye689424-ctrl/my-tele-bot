@@ -38,6 +38,49 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
+// ========== 🔄 AUTO RE-LOGIN FUNCTION ==========
+async function checkAndReLogin(chatId) {
+    const data = user_db[chatId];
+    if (!data?.token) return false;
+    
+    // Test token with a simple API call
+    const test = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
+    
+    // Token expired (msgCode 401, 403, or not 0)
+    if (test?.msgCode !== 0 && test?.msgCode !== undefined) {
+        console.log(`Token expired for user ${chatId}, attempting re-login...`);
+        
+        // Try to re-login with stored credentials
+        if (data.savedUsername && data.savedPassword) {
+            const loginRes = await callApi("Login", { 
+                phonetype: -1, 
+                logintype: "mobile", 
+                username: data.savedUsername, 
+                pwd: data.savedPassword 
+            });
+            
+            if (loginRes?.msgCode === 0) {
+                data.token = loginRes.data.tokenHeader + " " + loginRes.data.token;
+                data.running = true;
+                bot.sendMessage(chatId, "🔄 Session refreshed automatically! Continue betting...");
+                console.log(`Auto re-login successful for user ${chatId}`);
+                return true;
+            } else {
+                bot.sendMessage(chatId, "⚠️ Session expired! Please /start and login again.");
+                data.running = false;
+                data.token = null;
+                return false;
+            }
+        } else {
+            bot.sendMessage(chatId, "⚠️ Session expired! Please /start and login again.");
+            data.running = false;
+            data.token = null;
+            return false;
+        }
+    }
+    return true;
+}
+
 // ========== 🧠 PATTERN-BASED AI LOGIC ==========
 function getSideFromNumber(num) {
     return parseInt(num) >= 5 ? "Big" : "Small";
@@ -111,6 +154,10 @@ function runAI(history) {
 async function placeAutoBet(chatId, side, amount, stepIndex) {
     const data = user_db[chatId];
     if (!data || !data.token) return false;
+    
+    // Check token before betting
+    const isLoggedIn = await checkAndReLogin(chatId);
+    if (!isLoggedIn) return false;
     
     const fresh = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
     if (!fresh?.data?.list) return false;
@@ -219,6 +266,14 @@ async function executeAutoBet(chatId, isWin) {
 async function monitoringLoop(chatId) {
     while (user_db[chatId]?.running) {
         const data = user_db[chatId];
+        
+        // Check token before each API call
+        const isLoggedIn = await checkAndReLogin(chatId);
+        if (!isLoggedIn) {
+            await new Promise(r => setTimeout(r, 30000));
+            continue;
+        }
+        
         const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, data.token);
         
         if (res?.msgCode === 0 && res.data?.list?.length > 0) {
@@ -298,7 +353,6 @@ async function monitoringLoop(chatId) {
                 // ========== ADD AI MULTI-BRAIN ANALYSIS ==========
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
                 
-                // For display - create brain info like B1:S|B2:B|B3:B
                 const brainInfo = `B1:${ai.side.charAt(0)}|B2:${ai.side.charAt(0)}|B3:${ai.side === "Big" ? "S" : "B"}`;
                 const confidenceText = ai.dragon >= 3 ? "HIGH 🔥" : "NORMAL ⚡";
                 const patternText = ai.dragon >= 3 ? "Dragon Mode 🐉" : "Brain Voting 🧠";
@@ -356,7 +410,9 @@ bot.on('message', async (msg) => {
             currentBetStep: 0,
             consecutiveLosses: 0,
             consecutiveWins: 0,
-            autoSide: null
+            autoSide: null,
+            savedUsername: null,
+            savedPassword: null
         };
     }
 
@@ -364,6 +420,15 @@ bot.on('message', async (msg) => {
     if (user_db[chatId].pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
         const data = user_db[chatId];
+        
+        // Check token before betting
+        const isLoggedIn = await checkAndReLogin(chatId);
+        if (!isLoggedIn) {
+            bot.sendMessage(chatId, "❌ Session expired! Please /start and login again.");
+            user_db[chatId].pendingSide = null;
+            return;
+        }
+        
         const fresh = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
         const targetIssue = fresh?.data?.list ? (BigInt(fresh.data.list[0].issueNumber) + 1n).toString() : data.nextIssue;
 
@@ -471,9 +536,11 @@ bot.on('message', async (msg) => {
             currentBetStep: 0,
             consecutiveLosses: 0,
             consecutiveWins: 0,
-            autoSide: null
+            autoSide: null,
+            savedUsername: null,
+            savedPassword: null
         };
-        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ Pattern-Based AI\n✅ 1-2-3 ကိုက်စနစ်\n✅ တလှည့်စီဖမ်း\n✅ အချိုးအစားပြန်ညီ\n✅ တစ်ခုတည်းသော မက်ဆေ့ခ်ျမှာ အားလုံးပါ\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ Pattern-Based AI\n✅ 1-2-3 ကိုက်စနစ်\n✅ တလှည့်စီဖမ်း\n✅ အချိုးအစားပြန်ညီ\n✅ တစ်ခုတည်းသော မက်ဆေ့ခ်ျမှာ အားလုံးပါ\n✅ Auto Re-login\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
     }
 
     if (text === "📜 Bet History") {
@@ -499,6 +566,10 @@ bot.on('message', async (msg) => {
     if (text === "📊 Website (100)") {
         const data = user_db[chatId];
         if (!data.token) return bot.sendMessage(chatId, "❌ Please login first!");
+        
+        const isLoggedIn = await checkAndReLogin(chatId);
+        if (!isLoggedIn) return bot.sendMessage(chatId, "❌ Session expired! Please /start and login again.");
+        
         const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 20, typeId: 30 }, data.token);
         let list = "📊 **Last 20 Games**\n------------------\n";
         res?.data?.list?.forEach(i => { 
@@ -519,9 +590,11 @@ bot.on('message', async (msg) => {
         const res = await callApi("Login", { phonetype: -1, logintype: "mobile", username: username, pwd: text });
         if (res?.msgCode === 0) {
             data.token = res.data.tokenHeader + " " + res.data.token;
+            data.savedUsername = username;  // Save for auto re-login
+            data.savedPassword = text;      // Save for auto re-login
             data.running = true;
             monitoringLoop(chatId);
-            bot.sendMessage(chatId, "✅ Login Success! All-in-One Message Active...", mainMenu);
+            bot.sendMessage(chatId, "✅ Login Success! All-in-One Message Active...\n🔄 Auto re-login enabled!", mainMenu);
         } else { 
             bot.sendMessage(chatId, "❌ Login Failed!"); 
             data.tempPhone = null; 
