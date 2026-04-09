@@ -5,7 +5,7 @@ const http = require('http');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro - Full Feature'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro - Auto Bet Working'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -14,7 +14,7 @@ const bot = new TelegramBot(token, { polling: true });
 const dbPath = path.join(__dirname, 'user_data.db');
 const db = new sqlite3.Database(dbPath);
 
-// ========== DATABASE SETUP ==========
+// Database Setup
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         chat_id TEXT PRIMARY KEY,
@@ -61,7 +61,7 @@ db.serialize(() => {
     )`);
 });
 
-// ========== DATABASE HELPERS ==========
+// Database Helpers
 function getUserData(chatId, callback) {
     db.get(`SELECT * FROM users WHERE chat_id = ?`, [chatId], (err, row) => {
         if (err || !row) {
@@ -167,7 +167,7 @@ async function updateCachedUser(chatId, updates) {
     return user;
 }
 
-// ========== SECURITY HELPERS ==========
+// Security Helpers
 function generateRandomKey() {
     return "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         let r = Math.random() * 16 | 0;
@@ -194,7 +194,7 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// ========== AI LOGIC ==========
+// AI Logic
 function getSideFromNumber(num) {
     return parseInt(num) >= 5 ? "Big" : "Small";
 }
@@ -231,7 +231,7 @@ function runAI(history) {
     return { side: finalPrediction, dragon: streak, calc: calcTxt, pattern: patternTxt };
 }
 
-// ========== AUTO BET FUNCTION ==========
+// Auto Bet Function
 async function placeAutoBet(chatId, side, amount, stepIndex) {
     const data = await getCachedUser(chatId);
     if (!data || !data.token) return false;
@@ -276,7 +276,7 @@ async function placeAutoBet(chatId, side, amount, stepIndex) {
     return false;
 }
 
-// ========== MONITORING LOOP ==========
+// Monitoring Loop
 async function monitoringLoop(chatId) {
     while (true) {
         let data = await getCachedUser(chatId);
@@ -293,7 +293,7 @@ async function monitoringLoop(chatId) {
                 let roundProfit = 0;
                 let fullMessage = "";
                 
-                // ========== CHECK PENDING BETS ==========
+                // Check Pending Bets
                 let pendingBet = null;
                 for (let bet of data.betHistory) {
                     if (bet.status === "⏳ Pending" && bet.issue === lastRound.issueNumber.slice(-5)) {
@@ -321,6 +321,7 @@ async function monitoringLoop(chatId) {
                         
                         if (data.consecutiveWins >= data.stopLimit) {
                             bot.sendMessage(chatId, `🛑 Stop Limit Reached! (${data.stopLimit} wins) Auto Bet Stopped.`);
+                            data.autoBetActive = false;
                         }
                     } else {
                         pendingBet.status = "❌ LOSS";
@@ -328,18 +329,32 @@ async function monitoringLoop(chatId) {
                         roundProfit += pendingBet.pnl;
                         bot.sendMessage(chatId, `💔 **ရှုံးနိမ့်သည်!** 💔\n📌 ပွဲစဉ်: ${lastRound.issueNumber.slice(-5)}\n🎲 ရလဒ်: ${resultText} (${lastRound.number})\n💰 အရှုံး: -${pendingBet.amount} MMK`);
                         
-                        // ========== LOSS HANDLING ==========
+                        // LOSS HANDLING
                         if (pendingBet.isAuto) {
-                            // Auto bet loss - continue martingale or loss start steps
+                            // Auto bet loss
                             data.consecutiveLosses++;
                             data.consecutiveWins = 0;
                             
+                            // Continue Martingale or Loss Start steps
                             if (data.autoMode === "martingale") {
                                 const nextStep = data.currentBetStep + 1;
                                 if (nextStep < data.betPlan.length) {
                                     data.currentBetStep = nextStep;
                                     const nextAmount = data.betPlan[data.currentBetStep];
-                                    bot.sendMessage(chatId, `📉 ဆက်ရှုံး! နောက်ထိုးမယ်: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | ${nextAmount} MMK (အဆင့် ${data.currentBetStep+1}/${data.betPlan.length})`);
+                                    bot.sendMessage(chatId, `📉 ဆက်ရှုံး! နောက်ထိုးမယ်: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | ${nextAmount} MMK`);
+                                    await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
+                                } else {
+                                    bot.sendMessage(chatId, `❌ Max bet step reached! Auto Bet Stopped.`);
+                                    data.autoBetActive = false;
+                                    data.autoBetStarted = false;
+                                    data.currentBetStep = 0;
+                                }
+                            } else if (data.autoMode === "lossstart" && data.autoBetActive) {
+                                const nextStep = data.currentBetStep + 1;
+                                if (nextStep < data.betPlan.length) {
+                                    data.currentBetStep = nextStep;
+                                    const nextAmount = data.betPlan[data.currentBetStep];
+                                    bot.sendMessage(chatId, `📉 ဆက်ရှုံး! နောက်ထိုးမယ်: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | ${nextAmount} MMK`);
                                     await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
                                 } else {
                                     bot.sendMessage(chatId, `❌ Max bet step reached! Auto Bet Stopped.`);
@@ -349,20 +364,21 @@ async function monitoringLoop(chatId) {
                                 }
                             }
                         } else {
-                            // Manual bet loss - check if AI prediction was wrong (for Loss Start Mode)
-                            if (data.last_pred && data.last_pred !== realSide) {
-                                // AI prediction was wrong!
+                            // Manual bet loss - check AI prediction for Loss Start Mode
+                            const aiWasWrong = (data.last_pred && data.last_pred !== realSide);
+                            
+                            if (aiWasWrong) {
                                 data.consecutiveLosses++;
                                 data.consecutiveWins = 0;
                                 bot.sendMessage(chatId, `⚠️ AI ခန့်မှန်းမှား! (${data.consecutiveLosses}/${data.lossLimitStart})`);
                                 
-                                // Check if we should start auto bet (Loss Start Mode)
-                                if (!data.autoBetActive && data.autoMode === "lossstart" && data.consecutiveLosses >= data.lossLimitStart) {
+                                // Start Auto Bet if limit reached (Loss Start Mode)
+                                if (data.autoMode === "lossstart" && !data.autoBetActive && data.consecutiveLosses >= data.lossLimitStart) {
                                     data.autoBetActive = true;
                                     data.autoBetStarted = true;
                                     data.currentBetStep = 0;
                                     const firstAmount = data.betPlan[0];
-                                    bot.sendMessage(chatId, `⚠️ AI ခန့်မှန်း ${data.consecutiveLosses} ပွဲဆက်မှား!\n🤖 Auto Bet စတင်ပါပြီ: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | ${firstAmount} MMK`);
+                                    bot.sendMessage(chatId, `⚠️ AI ${data.consecutiveLosses} ပွဲဆက်မှား!\n🤖 Auto Bet စတင်ပါပြီ: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | ${firstAmount} MMK`);
                                     await placeAutoBet(chatId, data.autoSide, firstAmount, 0);
                                 }
                             }
@@ -373,7 +389,7 @@ async function monitoringLoop(chatId) {
                     data = await getCachedUser(chatId);
                 }
                 
-                // ========== VIP REPORT ==========
+                // VIP Report
                 if (data.last_pred) {
                     const isWin = data.last_pred === realSide;
                     const statusEmoji = isWin ? "အနိုင်ရရှိသည်🏆" : "ရှုံးနိမ့်သည်💔";
@@ -391,7 +407,7 @@ async function monitoringLoop(chatId) {
                     fullMessage += `\n`;
                 }
                 
-                // ========== AI NEW SIGNAL ==========
+                // AI New Signal
                 const ai = runAI(history);
                 data.last_issue = lastRound.issueNumber;
                 data.nextIssue = (BigInt(lastRound.issueNumber) + 1n).toString();
@@ -404,7 +420,7 @@ async function monitoringLoop(chatId) {
                 const patternText = ai.dragon >= 3 ? "Dragon Mode 🐉" : "Brain Voting 🧠";
                 const sideText = ai.side === "Big" ? "ကြီး (BIG)🧑‍💻" : "သေး (SMALL)🧑‍💻";
                 
-                const modeText = data.autoMode === "martingale" ? "Martingale (ရှုံးတိုင်းထိုး)" : `Loss Start (${data.lossLimitStart} ပွဲ AI မှားမှထိုး)`;
+                const modeText = data.autoMode === "martingale" ? "Martingale (AI မှားတိုင်းထိုး)" : `Loss Start (AI ${data.lossLimitStart} ပွဲမှားမှထိုး)`;
                 
                 fullMessage += `🚀 **AI Multi-Brain Analysis**\n━━━━━━━━━━━━━━━━\n🧠 Logic: \`${brainInfo}\`\n🛡 Pattern: \`${patternText}\`\n🐉 Dragon: \`${ai.dragon}\` ပွဲဆက်\n🦸AI ခန့်မှန်း🕵️: **${sideText}**\n📊 Confidence: \`${confidenceText}\` (${mmTime})\n🕒 ပွဲစဉ်: \`${data.nextIssue.slice(-5)}\`\n━━━━━━━━━━━━━━━━\n⚙️ **Auto Settings**\n📋 Bet Plan: ${data.betPlan.join(', ')}\n🏆 Stop Limit: ${data.stopLimit} win(s)\n🎯 Mode: ${modeText}\n📉 AI Loss Streak: ${data.consecutiveLosses}${data.autoMode === "lossstart" ? `/${data.lossLimitStart}` : ""}\n🤖 Status: ${data.autoBetActive ? "ACTIVE ✅" : "STANDBY ⏳"}`;
                 
@@ -422,7 +438,7 @@ async function monitoringLoop(chatId) {
     }
 }
 
-// ========== MENUS ==========
+// Menus
 const mainMenu = { 
     reply_markup: { 
         keyboard: [["📊 Website (100)", "📜 Bet History"], ["📈 AI History", "⚙️ Settings"], ["🚪 Logout"]], 
@@ -442,7 +458,7 @@ const settingsMenu = {
     }
 };
 
-// ========== HANDLERS ==========
+// Handlers
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id.toString();
     const text = msg.text;
@@ -473,7 +489,7 @@ bot.on('message', async (msg) => {
     
     // Settings commands
     if (text === "⚙️ Settings") {
-        const modeText = data.autoMode === "martingale" ? "Martingale (ရှုံးတိုင်းထိုး)" : `Loss Start (${data.lossLimitStart} ပွဲ AI မှားမှထိုး)`;
+        const modeText = data.autoMode === "martingale" ? "Martingale (AI မှားတိုင်းထိုး)" : `Loss Start (AI ${data.lossLimitStart} ပွဲမှားမှထိုး)`;
         const msg = `⚙️ **Auto Bet Settings**\n━━━━━━━━━━━━━━━━\n📋 Bet Plan: \`${data.betPlan.join(', ')}\`\n🏆 Stop Limit: \`${data.stopLimit}\` win(s)\n⚠️ Loss Start: \`${data.lossLimitStart}\` AI loss(es)\n🎯 Mode: \`${modeText}\`\n🤖 Status: ${data.autoBetActive ? "RUNNING ✅" : "STOPPED ❌"}\n📉 AI Loss Streak: ${data.consecutiveLosses}${data.autoMode === "lossstart" ? `/${data.lossLimitStart}` : ""}`;
         return bot.sendMessage(chatId, msg, settingsMenu);
     }
@@ -490,7 +506,7 @@ bot.on('message', async (msg) => {
     if (text === "⚠️ Set Loss Start") {
         data.settingMode = "lossstart";
         await updateCachedUser(chatId, data);
-        return bot.sendMessage(chatId, "⚠️ Loss Start Limit ထည့်ပါ (AI ခန့်မှန်းချက် ဘယ်နှစ်ပွဲမှားရင် စထိုးမလဲ)\n\nဥပမာ: 3, 5, 7\n\n3 ဆိုရင် AI ခန့်မှန်းချက် 3 ပွဲဆက်မှားမှ စထိုးမယ်");
+        return bot.sendMessage(chatId, "⚠️ Loss Start Limit ထည့်ပါ (AI ခန့်မှန်းချက် ဘယ်နှစ်ပွဲမှားရင် စထိုးမလဲ)\n\nဥပမာ: 3, 5, 7");
     }
     if (text === "🔄 Select Mode") {
         data.settingMode = "mode";
@@ -575,7 +591,7 @@ bot.on('message', async (msg) => {
         data.autoBetStarted = false;
         data.consecutiveLosses = 0;
         await updateCachedUser(chatId, data);
-        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ Pattern-Based AI\n✅ Martingale Mode (AI မှားတိုင်းထိုး)\n✅ Loss Start Mode (AI သတ်မှတ်အကြိမ်မှားမှထိုး)\n✅ Stop Limit (အနိုင်ပွဲပြည့်ရင်ရပ်)\n✅ Bet Plan အဆင့်လိုက်ထိုး\n✅ Database ဖြင့် အမြဲတမ်းသိမ်း\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ Pattern-Based AI\n✅ Martingale Mode (AI မှားတိုင်းထိုး)\n✅ Loss Start Mode (AI သတ်မှတ်အကြိမ်မှားမှထိုး)\n✅ Stop Limit\n✅ Bet Plan\n✅ Database\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
     }
     if (text === "📜 Bet History") {
         let txt = `📜 **Bet History**\n💰 Total: **${data.totalProfit.toFixed(2)}** MMK\n------------------\n`;
@@ -644,4 +660,4 @@ bot.on('callback_query', async (query) => {
     bot.sendMessage(chatId, `💰 **${data.pendingSide === "Big" ? "BIG 🔵" : "SMALL 🔴"}** အတွက် ထိုးမည့်ပမာဏ ရိုက်ထည့်ပါ:`);
 });
 
-console.log("✅ Bot is running with AI Loss Start Mode");
+console.log("✅ Bot is running with working Auto Bet modes");
