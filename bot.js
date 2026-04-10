@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro - Reset on Win'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro - Manual + Auto'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -219,7 +219,7 @@ async function monitoringLoop(chatId) {
                                 data.consecutiveWins = 0;
                                 data.consecutiveLosses = 0;
                             } else {
-                                // WIN: Reset step to 0 (start from 10 MMK again)
+                                // WIN: Reset step to 0
                                 data.currentBetStep = 0;
                                 const firstAmount = data.betPlan[0];
                                 await bot.sendMessage(chatId, `✅ အနိုင်! ပြန်စမယ်: ${firstAmount} MMK`);
@@ -342,7 +342,7 @@ bot.on('message', async (msg) => {
     const text = msg.text;
     let data = getUserData(chatId);
     
-    // Manual Bet Amount Input
+    // Manual Bet Amount Input (ဒါက သေချာအလုပ်လုပ်မယ်)
     if (data.pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
         const fresh = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
@@ -423,7 +423,7 @@ bot.on('message', async (msg) => {
         data.consecutiveWins = 0;
         data.consecutiveLosses = 0;
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro v3.0 🎯\n\nအင်္ဂါရပ်များ:\n✅ 1-2-3 Rule AI\n✅ Loss Start (AI မှားမှစထိုး)\n✅ Stop Limit (အနိုင်ပြည့်ရင်ရပ်)\n✅ အနိုင်ရရင် 10 MMK ပြန်စ\n✅ Bet Plan အဆင့်လိုက်\n✅ Manual Bet (ခလုတ်)\n✅ Local Storage\n\n⚙️ Setting ချိန်ပါ:\n1. 🎲 Set Bet Plan\n2. 🛑 Set Stop Limit\n3. ⚠️ Set Loss Start\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro v3.0 🎯\n\nအင်္ဂါရပ်များ:\n✅ 1-2-3 Rule AI\n✅ Loss Start (AI မှားမှစထိုး)\n✅ Stop Limit (အနိုင်ပြည့်ရင်ရပ်)\n✅ အနိုင်ရရင် 10 MMK ပြန်စ\n✅ Bet Plan အဆင့်လိုက်\n✅ Manual Bet (ခလုတ်နှိပ်ပြီးထိုး)\n✅ Local Storage\n\n⚙️ Setting ချိန်ပါ:\n1. 🎲 Set Bet Plan\n2. 🛑 Set Stop Limit\n3. ⚠️ Set Loss Start\n\n📌 Manual Bet အတွက် AI Signal အောက်က ခလုတ်နှိပ်ပါ။\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
     if (text === "📜 Bet History") {
         let txt = `📜 Bet History\n💰 Total: ${data.totalProfit.toFixed(2)} MMK\n------------------\n`;
@@ -473,7 +473,7 @@ bot.on('message', async (msg) => {
             delete data.tempPhone;
             saveUserData(chatId, data);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, "✅ Login Success!\n\n⚙️ Setting ချိန်ပြီးတာနဲ့ Auto အလုပ်လုပ်ပါမယ်။", mainMenu);
+            await bot.sendMessage(chatId, "✅ Login Success!\n\n⚙️ Setting ချိန်ပြီးတာနဲ့ Auto အလုပ်လုပ်ပါမယ်။\n📌 Manual Bet အတွက် AI Signal အောက်က ခလုတ်နှိပ်ပါ။", mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed!");
             delete data.tempPhone;
@@ -491,4 +491,4 @@ bot.on('callback_query', async (query) => {
     await bot.sendMessage(chatId, `💰 ${data.pendingSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} အတွက် ထိုးမည့်ပမာဏ ရိုက်ထည့်ပါ:`);
 });
 
-console.log("✅ Bot running - Reset to 10 MMK on win");
+console.log("✅ Bot running - Manual + Auto both work");
