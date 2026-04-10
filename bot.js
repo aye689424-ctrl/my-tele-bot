@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro - Timing Fixed'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro - Time Fixed'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -42,7 +42,8 @@ function getUserData(chatId) {
             currentBetStep: 0, consecutiveWins: 0, consecutiveLosses: 0,
             last_issue: null, last_pred: null,
             manualBetLock: false, manualBetIssue: null,
-            betHistory: [], aiLogs: []
+            betHistory: [], 
+            aiLogs: []
         };
         saveAllData(allUsers);
     }
@@ -72,34 +73,52 @@ function signMd5(payload) {
 }
 
 async function callApi(endpoint, data, authToken = null) {
-    const payload = { ...data, language: 0, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
+    const payload = { ...data, language: 7, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
     payload.signature = signMd5(payload);
     const headers = { "Content-Type": "application/json;charset=UTF-8", "Authorization": authToken || "" };
     try {
-        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 12000 });
+        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 5000 });
         return res.data;
     } catch (e) { 
-        console.log(`API Error (${endpoint}):`, e.message);
         return null; 
     }
 }
 
-// ========== အရေးကြီး: ပွဲစဉ်နှင့် အချိန်စစ်ဆေးခြင်း ==========
+// ========== အချိန်တွက်ချက်ခြင်း (Response အသစ်အတွက်) ==========
+function parseTimeString(timeStr) {
+    // "2026-04-10 17:15:00" ကို Date Object ပြောင်း
+    return new Date(timeStr.replace(' ', 'T')).getTime();
+}
+
 async function getGameIssueInfo(token) {
     const res = await callApi("GetGameIssue", { typeId: 30 }, token);
     if (res?.msgCode === 0 && res.data) {
+        const startTime = parseTimeString(res.data.startTime);
+        const endTime = parseTimeString(res.data.endTime);
+        const serverNow = parseTimeString(res.data.serviceNowTime);
+        const intervalMs = res.data.intervalM * 60 * 1000; // မိနစ်ကနေ မီလီစက္ကန့်
+        
+        // ထိုးလို့ရတဲ့အချိန် = startTime - 10 seconds (ခန့်မှန်း)
+        // အရောင်းပိတ်ချိန် = startTime - 3 seconds (ခန့်မှန်း)
+        const bettingOpenTime = startTime - 10000;  // ပွဲမစခင် 10 စက္ကန့်
+        const bettingCloseTime = startTime - 3000; // ပွဲမစခင် 3 စက္ကန့်
+        
+        const now = Date.now();
+        const remainTime = Math.floor((bettingCloseTime - now) / 1000);
+        
         return {
             issueNumber: res.data.issueNumber,
-            // API က ပြန်ပေးတဲ့ အချိန်ပေါ်မူတည်ပြီး ပြင်ဆင်ပါ
-            openTime: res.data.openTime,   
-            closeTime: res.data.closeTime, 
-            currentTime: res.data.currentTime || Math.floor(Date.now() / 1000)
+            startTime: startTime,
+            endTime: endTime,
+            bettingCloseTime: bettingCloseTime,
+            remainTime: remainTime,
+            canBet: now >= bettingOpenTime && now <= bettingCloseTime
         };
     }
     return null;
 }
 
-// ========== AI LOGIC (1-2-3 RULE) ==========
+// ========== AI LOGIC ==========
 function getSideFromNumber(num) {
     return parseInt(num) >= 5 ? "Big" : "Small";
 }
@@ -118,17 +137,62 @@ function runAI(history) {
     else if(streak === 2) prediction = currentSide;
     else if(streak >= 3) prediction = currentSide === "Big" ? "Small" : "Big";
     
-    let finalPrediction = prediction || "Big";
-    let calcTxt = `${resArr[2]?.charAt(0) || '?'}-${resArr[1]?.charAt(0) || '?'}-${resArr[0]?.charAt(0) || '?'}`;
-    return { side: finalPrediction, dragon: streak, calc: calcTxt };
+    return { side: prediction || "Big", dragon: streak };
 }
 
-// ========== အချိန်ကိုက် ထိုးခြင်း Function ==========
-async function placeBetWithTiming(chatId, side, amount, stepIndex, isAuto = true) {
+// ========== AI History Formatting ==========
+function formatAIHistoryForVIP(aiLogs, limit = 10) {
+    if (!aiLogs || aiLogs.length === 0) return "📊 မှတ်တမ်းမရှိသေးပါ";
+    
+    const recentLogs = aiLogs.slice(0, limit);
+    let winCount = recentLogs.filter(l => l.status === "✅").length;
+    let winRate = ((winCount / recentLogs.length) * 100).toFixed(1);
+    
+    let txt = `📈 AI ခန့်မှန်းချက် မှတ်တမ်း (နောက်ဆုံး ${recentLogs.length} ပွဲ)\n`;
+    txt += `━━━━━━━━━━━━━━━━\n`;
+    txt += `🏆 Win Rate: ${winCount}/${recentLogs.length} (${winRate}%)\n`;
+    txt += `━━━━━━━━━━━━━━━━\n`;
+    
+    recentLogs.forEach((log) => {
+        let shortIssue = log.issue.slice(-3);
+        let resultEmoji = log.result === "Big" ? "🔵" : "🔴";
+        let predEmoji = log.prediction === "Big" ? "🔵" : "🔴";
+        txt += `${log.status} ${shortIssue} | ${predEmoji}→${resultEmoji} | ${log.number || ''}\n`;
+    });
+    
+    return txt;
+}
+
+function formatFullAIHistory(aiLogs) {
+    if (!aiLogs || aiLogs.length === 0) return "📊 မှတ်တမ်းမရှိသေးပါ";
+    
+    let totalWins = aiLogs.filter(l => l.status === "✅").length;
+    let winRate = ((totalWins / aiLogs.length) * 100).toFixed(1);
+    
+    let txt = `📈 AI ခန့်မှန်းချက် အပြည့်အစုံ\n`;
+    txt += `━━━━━━━━━━━━━━━━\n`;
+    txt += `📊 စုစုပေါင်း: ${aiLogs.length} ပွဲ\n`;
+    txt += `✅ အနိုင်: ${totalWins} ပွဲ\n`;
+    txt += `❌ အရှုံး: ${aiLogs.length - totalWins} ပွဲ\n`;
+    txt += `🏆 Win Rate: ${winRate}%\n`;
+    txt += `━━━━━━━━━━━━━━━━\n`;
+    
+    aiLogs.slice(0, 30).forEach((log, i) => {
+        let shortIssue = log.issue.slice(-3);
+        let resultEmoji = log.result === "Big" ? "🔵 BIG" : "🔴 SMALL";
+        let predEmoji = log.prediction === "Big" ? "🔵 BIG" : "🔴 SMALL";
+        txt += `${i+1}. ${log.status} ပွဲ ${shortIssue} | ခန့်မှန်း: ${predEmoji} | ရလဒ်: ${resultEmoji} (${log.number || ''})\n`;
+    });
+    
+    return txt;
+}
+
+// ========== ထိုးခြင်း Function (အချိန်အလိုက် ထိုး) ==========
+async function placeBetWithCorrectTiming(chatId, side, amount, stepIndex, isAuto = true) {
     const data = getUserData(chatId);
     if (!data || !data.token) return false;
     
-    // 1. နောက်ထွက်မည့် ပွဲစဉ် အချက်အလက် ရယူပါ
+    // 1. ပွဲစဉ် အချက်အလက် ရယူ
     const issueInfo = await getGameIssueInfo(data.token);
     if (!issueInfo || !issueInfo.issueNumber) {
         await bot.sendMessage(chatId, "❌ ပွဲစဉ်အချက်အလက် ရယူ၍မရပါ။");
@@ -136,26 +200,23 @@ async function placeBetWithTiming(chatId, side, amount, stepIndex, isAuto = true
     }
     
     const targetIssue = issueInfo.issueNumber;
-    const closeTime = issueInfo.closeTime; // Unix Timestamp (Seconds)
-    const currentTime = issueInfo.currentTime || Math.floor(Date.now() / 1000);
     
-    // 2. အချိန်စစ်ဆေးခြင်း (ထိုးချိန်ပိတ်ဖို့ ၅ စက္ကန့်အလိုအထိ စောင့်ဆိုင်း)
-    const timeUntilClose = closeTime - currentTime;
-    
-    if (timeUntilClose <= 0) {
-        await bot.sendMessage(chatId, `❌ ပွဲစဉ် ${targetIssue.slice(-5)} ထိုးချိန်ပိတ်သွားပါပြီ။ နောက်ပွဲစဉ်ကို စောင့်ပါ။`);
-        return false;
+    // 2. ထိုးလို့ရတဲ့အချိန်လား စစ်ဆေး
+    if (!issueInfo.canBet) {
+        const waitUntil = issueInfo.startTime - 10000; // betting open time
+        const waitMs = waitUntil - Date.now();
+        
+        if (waitMs > 0) {
+            const waitSec = Math.floor(waitMs / 1000);
+            await bot.sendMessage(chatId, `⏳ ပွဲစဉ် ${targetIssue.slice(-5)} အတွက် ${waitSec} စက္ကန့်စောင့်ဆိုင်းပါမည်...`);
+            await new Promise(r => setTimeout(r, waitMs));
+        } else {
+            await bot.sendMessage(chatId, `❌ ပွဲစဉ် ${targetIssue.slice(-5)} ထိုးချိန်ပိတ်သွားပါပြီ။ နောက်ပွဲစဉ်ကို စောင့်ပါ။`);
+            return false;
+        }
     }
     
-    // ထိုးဖို့ အကောင်းဆုံးအချိန် (Close Time မတိုင်ခင် ၈ စက္ကန့်အလို)
-    const waitTime = Math.max(0, timeUntilClose - 8);
-    
-    if (waitTime > 0) {
-        await bot.sendMessage(chatId, `⏳ ပွဲစဉ် ${targetIssue.slice(-5)} အတွက် ${waitTime} စက္ကန့်စောင့်ဆိုင်းပါမည်...`);
-        await new Promise(r => setTimeout(r, waitTime * 1000));
-    }
-    
-    // 3. Payload ပြင်ဆင်ခြင်း
+    // 3. Payload ပြင်ဆင်ပြီး ချက်ချင်းထိုး
     let baseUnit = amount < 10000 ? 10 : Math.pow(10, Math.floor(Math.log10(amount)) - 2);
     if (baseUnit < 10) baseUnit = 10;
     const betCount = Math.floor(amount / baseUnit);
@@ -171,26 +232,7 @@ async function placeBetWithTiming(chatId, side, amount, stepIndex, isAuto = true
         isAgree: true 
     };
     
-    // 4. API ထိုးခြင်း (Retry Logic ထည့်ထားခြင်း)
-    let retries = 3;
-    let res = null;
-    
-    while (retries > 0) {
-        res = await callApi("GameBetting", betPayload, data.token);
-        
-        // အောင်မြင်ရင် loop ထွက်
-        if (res?.msgCode === 0 || res?.msg === "Bet success") break;
-        
-        // "The current period is settled" Error ဆိုရင် နောက်ထပ် ထပ်ကြိုးစားစရာမလိုပါ
-        if (res?.msg && res.msg.includes("settled")) {
-            break;
-        }
-        
-        retries--;
-        if (retries > 0) {
-            await new Promise(r => setTimeout(r, 1500)); // 1.5 စက္ကန့်စောင့်
-        }
-    }
+    const res = await callApi("GameBetting", betPayload, data.token);
     
     if (res?.msgCode === 0 || res?.msg === "Bet success") {
         const newBet = { 
@@ -232,6 +274,7 @@ async function monitoringLoop(chatId) {
             
             if (currentIssue !== data.last_issue) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
+                const realNumber = lastRound.number;
                 
                 // 1. Pending Bet Result Check
                 let pendingBet = null;
@@ -288,10 +331,16 @@ async function monitoringLoop(chatId) {
                     data = getUserData(chatId);
                 }
 
-                // 2. AI Tracking
+                // 2. AI Prediction Tracking
                 if (data.last_pred) {
                     const aiCorrect = (data.last_pred === realSide);
-                    const logEntry = { status: aiCorrect ? "✅" : "❌", issue: currentIssue.slice(-3), result: realSide, prediction: data.last_pred };
+                    const logEntry = { 
+                        status: aiCorrect ? "✅" : "❌", 
+                        issue: currentIssue.slice(-5), 
+                        result: realSide, 
+                        prediction: data.last_pred,
+                        number: realNumber
+                    };
                     data.aiLogs.unshift(logEntry);
                     if (data.aiLogs.length > 50) data.aiLogs.pop();
                     
@@ -320,24 +369,21 @@ async function monitoringLoop(chatId) {
                         betSide = realSide;
                         betAmount = data.betPlan[data.currentBetStep];
                         shouldBet = true;
-                        await bot.sendMessage(chatId, `🔄 [Follow Mode] နောက်ဆုံးရလဒ် ${betSide} ကို ဆက်ထိုးပါမည်။`);
                     }
                     else if (data.autoMode === 'ai_correction') {
                         if (data.consecutiveLosses >= data.lossStartLimit) {
                             betSide = data.last_pred;
                             betAmount = data.betPlan[data.currentBetStep];
                             shouldBet = true;
-                            await bot.sendMessage(chatId, `🤖 [AI Correction] AI ${data.consecutiveLosses} ပွဲဆက်မှား၍ Auto Bet စတင်ပါပြီ။`);
                         }
                     }
                     
                     if (shouldBet && betSide) {
-                        // ✅ အချိန်ကိုက် ထိုးမည့် Function ကို ခေါ်ပါ
-                        await placeBetWithTiming(chatId, betSide, betAmount, data.currentBetStep, true);
+                        await placeBetWithCorrectTiming(chatId, betSide, betAmount, data.currentBetStep, true);
                     }
                 }
 
-                // 5. Send UI Update
+                // 5. Send VIP Signal
                 const issueInfo = await getGameIssueInfo(data.token);
                 const nextIssue = issueInfo?.issueNumber || 'N/A';
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
@@ -347,15 +393,20 @@ async function monitoringLoop(chatId) {
                     modeText = data.autoMode === 'follow' ? "🟢 Follow Mode" : "🟡 AI Correction";
                 }
                 
-                let statusMsg = `💥 BIGWIN SIGNAL 💥\n━━━━━━━━━━━━━━━━\n`;
+                const aiHistoryText = formatAIHistoryForVIP(data.aiLogs, 10);
+                
+                let statusMsg = `💥 BIGWIN VIP SIGNAL 💥\n`;
+                statusMsg += `━━━━━━━━━━━━━━━━\n`;
                 statusMsg += `🗓 Period: ${currentIssue}\n`;
-                statusMsg += `🎲 Result: ${realSide} (${lastRound.number})\n`;
+                statusMsg += `🎲 Result: ${realSide} (${realNumber})\n`;
                 statusMsg += `🤖 AI Pred: ${data.last_pred}\n`;
                 statusMsg += `📊 Mode: ${modeText}\n`;
                 statusMsg += `💰 Total Profit: ${data.totalProfit.toFixed(2)} MMK\n`;
                 statusMsg += `━━━━━━━━━━━━━━━━\n`;
                 statusMsg += `🚀 Next Issue: ${nextIssue.slice(-5)} (${mmTime})\n`;
-                statusMsg += `🦸 AI ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}`;
+                statusMsg += `🦸 AI ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
+                statusMsg += `━━━━━━━━━━━━━━━━\n`;
+                statusMsg += aiHistoryText;
                 
                 await bot.sendMessage(chatId, statusMsg, {
                     reply_markup: { inline_keyboard: [[
@@ -365,17 +416,18 @@ async function monitoringLoop(chatId) {
                 });
             }
         }
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 2000));
     }
 }
 
-// ========== MENUS & HANDLERS (မပြောင်းလဲပါ) ==========
+// ========== MENUS & HANDLERS ==========
 const mainMenu = { 
     reply_markup: { 
         keyboard: [
             ["🚀 Start Auto", "🛑 Stop Auto"], 
             ["⚙️ Settings", "📊 Status"],
-            ["📜 History", "🚪 Logout"]
+            ["📜 Bet History", "📈 AI History"],
+            ["🚪 Logout"]
         ], 
         resize_keyboard: true 
     } 
@@ -407,16 +459,14 @@ bot.on('message', async (msg) => {
     const text = msg.text;
     let data = getUserData(chatId);
     
-    // Manual Bet Amount Input
     if (data.pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
-        await placeBetWithTiming(chatId, data.pendingSide, amount, -1, false);
+        await placeBetWithCorrectTiming(chatId, data.pendingSide, amount, -1, false);
         data.pendingSide = null;
         saveUserData(chatId, data);
         return;
     }
     
-    // Main Menu Actions
     if (text === '/start') {
         data.running = false;
         data.token = null;
@@ -427,7 +477,7 @@ bot.on('message', async (msg) => {
         data.autoRunning = false;
         data.autoMode = null;
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro v4.1 (Timing Fixed) 🎯\n\nMode နှစ်မျိုး:\n1️⃣ Follow Pattern (နောက်လိုက်ထိုး)\n2️⃣ AI Correction (AIမှားမှစထိုး)\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro - Time Fixed 🎯\n\nပွဲမစခင် 10 စက္ကန့်အလိုမှာ အလိုအလျောက်ထိုးပေးပါမည်။\n\nMode နှစ်မျိုး:\n1️⃣ Follow Pattern (နောက်လိုက်ထိုး)\n2️⃣ AI Correction (AIမှားမှစထိုး)\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
     
     if (text === "🚀 Start Auto") {
@@ -442,7 +492,7 @@ bot.on('message', async (msg) => {
         data.consecutiveWins = 0;
         data.consecutiveLosses = 0;
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, "✅ Follow Pattern Mode Started!\n\nနောက်ဆုံးထွက်တဲ့ဘက်ကို ဆက်တိုက်ထိုးပါမည်။\nStop Limit: " + data.stopLimit + " နိုင်ရင်ရပ်မည်။", mainMenu);
+        await bot.sendMessage(chatId, "✅ Follow Pattern Mode Started!\n\nပွဲမစခင် 10 စက္ကန့်အလိုမှာ နောက်ဆုံးရလဒ်ကို လိုက်ထိုးပါမည်။\nStop Limit: " + data.stopLimit + " နိုင်ရင်ရပ်မည်။", mainMenu);
     }
     
     if (text === "🤖 AI Correction (AIမှားမှထိုး)") {
@@ -506,7 +556,7 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "Main Menu", mainMenu);
     }
     
-    if (text === "📜 History") {
+    if (text === "📜 Bet History") {
         let txt = `📜 Bet History\n💰 Total: ${data.totalProfit.toFixed(2)} MMK\n------------------\n`;
         data.betHistory.slice(0, 20).forEach(h => {
             const type = h.isAuto ? "[AUTO]" : "[MANUAL]";
@@ -514,6 +564,11 @@ bot.on('message', async (msg) => {
             txt += `${h.status} ${type} | ${h.issue} | ${h.side} | ${h.amount} ${pnl}\n`;
         });
         return bot.sendMessage(chatId, txt || "No history.");
+    }
+    
+    if (text === "📈 AI History") {
+        const txt = formatFullAIHistory(data.aiLogs);
+        return bot.sendMessage(chatId, txt);
     }
     
     if (text === "🚪 Logout") {
@@ -524,7 +579,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "👋 Logged out. Send /start to login again.");
     }
     
-    // Handle Settings Input
     if (data.settingMode) {
         const mode = data.settingMode;
         if (mode === "betplan") {
@@ -558,7 +612,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "Settings updated!", settingsMenu);
     }
     
-    // Login
     if (/^\d{9,11}$/.test(text) && !data.token) {
         data.tempPhone = text;
         saveUserData(chatId, data);
@@ -575,7 +628,7 @@ bot.on('message', async (msg) => {
             delete data.tempPhone;
             saveUserData(chatId, data);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, "✅ Login Success!\n\nStart Auto နှိပ်ပြီး Mode ရွေးချယ်ပါ။", mainMenu);
+            await bot.sendMessage(chatId, "✅ Login Success!\n\nStart Auto နှိပ်ပြီး Mode ရွေးချယ်ပါ။\nပွဲမစခင် 10 စက္ကန့်အလိုမှာ အလိုအလျောက်ထိုးပေးပါမည်။", mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed!");
             delete data.tempPhone;
@@ -593,4 +646,4 @@ bot.on('callback_query', async (query) => {
     await bot.sendMessage(chatId, `💰 ${data.pendingSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} အတွက် ထိုးမည့်ပမာဏ ရိုက်ထည့်ပါ:`);
 });
 
-console.log("✅ Bot running - Timing issue fixed");
+console.log("✅ Bot running - Time calculation fixed based on API response");
