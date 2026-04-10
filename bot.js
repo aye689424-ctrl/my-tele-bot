@@ -3,17 +3,24 @@ const axios = require('axios');
 const crypto = require('crypto');
 const http = require('http');
 
+// ===== SERVER (Render Keep Alive) =====
 http.createServer((req, res) => {
   res.end('WinGo PRO AI Bot Running');
 }).listen(process.env.PORT || 8080);
 
 // ===== CONFIG =====
-const token = 'YOUR_BOT_TOKEN';
+const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 
-const bot = new TelegramBot(token, { polling: true });
+const bot = new TelegramBot(token, {
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: { timeout: 10 }
+  }
+});
 
-// ===== USER DATA =====
+// ===== MEMORY =====
 let users = {};
 
 // ===== HELPERS =====
@@ -51,11 +58,9 @@ async function callApi(endpoint, data, auth = "") {
 function proAI(history, emerd) {
   const sides = history.map(x => parseInt(x.number) >= 5 ? "Big" : "Small");
 
-  // Trend
   let trend = sides[0];
   let trendScore = (sides[0] === sides[1]) ? 20 : 0;
 
-  // Streak
   let streak = 1;
   for (let i = 1; i < sides.length; i++) {
     if (sides[i] === sides[0]) streak++;
@@ -70,7 +75,6 @@ function proAI(history, emerd) {
     streakScore = 30;
   }
 
-  // Emerd
   let emerdSide = "Big";
   let emerdScore = 0;
 
@@ -92,9 +96,7 @@ function proAI(history, emerd) {
     emerdScore = 40;
   }
 
-  // Combine
   let vote = { Big: 0, Small: 0 };
-
   vote[trend] += trendScore;
   vote[streakSide] += streakScore;
   vote[emerdSide] += emerdScore;
@@ -160,7 +162,6 @@ async function loop(user) {
         }
       });
 
-      // AUTO
       if (user.auto && ai.confidence >= 40) {
         const next = (BigInt(issue) + 1n).toString();
         await placeBet(user, ai.side, next);
@@ -253,8 +254,8 @@ bot.on('callback_query', async (q) => {
 
   if (q.data.startsWith("bet_")) {
     const side = q.data.split("_")[1];
-    const res = await callApi("GetNoaverageEmerdList", { pageNo:1, pageSize:1, typeId:30 }, u.token);
 
+    const res = await callApi("GetNoaverageEmerdList", { pageNo:1, pageSize:1, typeId:30 }, u.token);
     const next = (BigInt(res.data.list[0].issueNumber) + 1n).toString();
 
     await placeBet(u, side, next);
