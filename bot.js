@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro - Local Storage'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro - Fixed'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -14,51 +14,33 @@ const bot = new TelegramBot(token, { polling: true });
 // ========== LOCAL JSON FILE STORAGE ==========
 const DATA_FILE = path.join(__dirname, 'user_data.json');
 
-// Load data from file
 function loadAllData() {
     try {
         if (fs.existsSync(DATA_FILE)) {
-            const data = fs.readFileSync(DATA_FILE, 'utf8');
-            return JSON.parse(data);
+            return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
         }
-    } catch (e) {
-        console.log('Error loading data:', e);
-    }
+    } catch (e) {}
     return {};
 }
 
-// Save data to file
 function saveAllData(data) {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    } catch (e) {
-        console.log('Error saving data:', e);
-    }
+    } catch (e) {}
 }
 
 let allUsers = loadAllData();
 
-// Helper to get user data
 function getUserData(chatId) {
     if (!allUsers[chatId]) {
         allUsers[chatId] = {
-            token: null,
-            phone: null,
-            running: false,
-            totalProfit: 0,
+            token: null, phone: null, running: false, totalProfit: 0,
             betPlan: [10, 30, 60, 90, 150, 250, 400, 650],
-            stopLimit: 3,
-            lossStartLimit: 1,
-            autoBetActive: false,
-            currentBetStep: 0,
-            consecutiveLosses: 0,
-            consecutiveWins: 0,
-            last_issue: null,
-            nextIssue: null,
-            last_pred: null,
-            autoSide: null,
-            betHistory: [],
-            aiLogs: []
+            stopLimit: 3, lossStartLimit: 1,
+            autoBetActive: false, currentBetStep: 0,
+            consecutiveLosses: 0, consecutiveWins: 0,
+            last_issue: null, nextIssue: null, last_pred: null, autoSide: null,
+            betHistory: [], aiLogs: []
         };
         saveAllData(allUsers);
     }
@@ -97,14 +79,13 @@ async function callApi(endpoint, data, authToken = null) {
     } catch (e) { return null; }
 }
 
-// ========== SIMPLE AI LOGIC (1-2-3 RULE) ==========
+// ========== AI LOGIC (1-2-3 RULE) ==========
 function getSideFromNumber(num) {
     return parseInt(num) >= 5 ? "Big" : "Small";
 }
 
 function runAI(history) {
     const resArr = history.map(i => getSideFromNumber(i.number));
-    
     let streak = 1;
     let currentSide = resArr[0];
     for(let i = 1; i < resArr.length; i++) {
@@ -119,14 +100,23 @@ function runAI(history) {
     
     let finalPrediction = prediction || "Big";
     let calcTxt = `${resArr[2]?.charAt(0) || '?'}-${resArr[1]?.charAt(0) || '?'}-${resArr[0]?.charAt(0) || '?'}`;
-    
     return { side: finalPrediction, dragon: streak, calc: calcTxt };
 }
 
-// ========== AUTO BET FUNCTION ==========
-async function placeAutoBet(chatId, side, amount, stepIndex, targetIssue) {
+// ========== FIXED AUTO BET FUNCTION ==========
+async function placeAutoBet(chatId, side, amount, stepIndex) {
     const data = getUserData(chatId);
     if (!data || !data.token) return false;
+    
+    // Get current game
+    const fresh = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
+    if (!fresh?.data?.list) return false;
+    
+    // Use NEXT issue (current + 1) for betting
+    const currentIssue = fresh.data.list[0].issueNumber;
+    const targetIssue = (BigInt(currentIssue) + 1n).toString();
+    
+    console.log(`🎯 [AUTO] Chat ${chatId}: Betting on issue ${targetIssue.slice(-5)} | ${side} | ${amount} MMK | Step ${stepIndex+1}`);
     
     let baseUnit = amount < 10000 ? 10 : Math.pow(10, Math.floor(Math.log10(amount)) - 2);
     if (baseUnit < 10) baseUnit = 10;
@@ -161,8 +151,11 @@ async function placeAutoBet(chatId, side, amount, stepIndex, targetIssue) {
         const sideText = side === "Big" ? "BIG 🔵" : "SMALL 🔴";
         await bot.sendMessage(chatId, `📌 **ပွဲစဉ်: ${targetIssue.slice(-5)}**\n🎲 **${sideText}** | ${amount} MMK ထိုးလိုက်ပြီး ✅\n⏳ **အဖြေခနစောင့်ပါ...**`);
         return true;
+    } else {
+        console.log(`❌ [AUTO] Failed: ${JSON.stringify(res)}`);
+        await bot.sendMessage(chatId, `❌ Auto Bet Failed: ${res?.message || res?.msg || "Unknown error"}`);
+        return false;
     }
-    return false;
 }
 
 // ========== MONITORING LOOP ==========
@@ -204,6 +197,7 @@ async function monitoringLoop(chatId) {
                         await bot.sendMessage(chatId, `🎉 **အနိုင်ရရှိသည်!** 🎉\n📌 ပွဲစဉ်: ${currentIssue.slice(-5)}\n🎲 ရလဒ်: ${resultText} (${lastRound.number})\n💰 အမြတ်: **+${pendingBet.pnl} MMK**`);
                         
                         data.consecutiveWins++;
+                        console.log(`✅ [WIN] Chat ${chatId}: ${pendingBet.amount} MMK won, Wins: ${data.consecutiveWins}/${data.stopLimit}`);
                         
                         if (data.consecutiveWins >= data.stopLimit) {
                             await bot.sendMessage(chatId, `🛑 **Stop Limit Reached!** (${data.stopLimit} wins)\nAuto Bet Stopped. ✅ Start Auto Bet ပြန်နှိပ်မှ ပြန်ထိုးပါမည်။`);
@@ -213,7 +207,9 @@ async function monitoringLoop(chatId) {
                             data.consecutiveLosses = 0;
                         } else {
                             await bot.sendMessage(chatId, `✅ WIN! (${data.consecutiveWins}/${data.stopLimit}) ဆက်ထိုးမည်။`);
-                            await placeAutoBet(chatId, data.autoSide, data.betPlan[data.currentBetStep], data.currentBetStep, nextIssue);
+                            // Continue with SAME step (do not reset)
+                            const nextAmount = data.betPlan[data.currentBetStep];
+                            await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
                         }
                     } else {
                         pendingBet.status = "❌ LOSS";
@@ -221,13 +217,15 @@ async function monitoringLoop(chatId) {
                         roundProfit += pendingBet.pnl;
                         await bot.sendMessage(chatId, `💔 **ရှုံးနိမ့်သည်!** 💔\n📌 ပွဲစဉ်: ${currentIssue.slice(-5)}\n🎲 ရလဒ်: ${resultText} (${lastRound.number})\n💰 အရှုံး: **-${pendingBet.amount} MMK**`);
                         
+                        console.log(`❌ [LOSS] Chat ${chatId}: ${pendingBet.amount} MMK lost`);
+                        
                         data.consecutiveWins = 0;
                         const nextStep = data.currentBetStep + 1;
                         if (nextStep < data.betPlan.length) {
                             data.currentBetStep = nextStep;
                             const nextAmount = data.betPlan[data.currentBetStep];
                             await bot.sendMessage(chatId, `📉 **ဆက်ရှုံး!** နောက်ထိုးမယ်: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | **${nextAmount} MMK** (အဆင့် ${data.currentBetStep+1}/${data.betPlan.length})`);
-                            await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep, nextIssue);
+                            await placeAutoBet(chatId, data.autoSide, nextAmount, data.currentBetStep);
                         } else {
                             await bot.sendMessage(chatId, `❌ **Max bet step reached!** Auto Bet Stopped.`);
                             data.autoBetActive = false;
@@ -254,7 +252,7 @@ async function monitoringLoop(chatId) {
                         data.consecutiveWins = 0;
                         const firstAmount = data.betPlan[0];
                         await bot.sendMessage(chatId, `⚠️ **AI ${data.consecutiveLosses} ပွဲဆက်မှား!**\n🤖 Auto Bet စတင်ပါပြီ: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | **${firstAmount} MMK**`);
-                        await placeAutoBet(chatId, data.autoSide, firstAmount, 0, nextIssue);
+                        await placeAutoBet(chatId, data.autoSide, firstAmount, 0);
                         data.consecutiveLosses = 0;
                     }
                     saveUserData(chatId, data);
@@ -274,7 +272,6 @@ async function monitoringLoop(chatId) {
                     
                     fullMessage += `💥 **BIGWIN VIP SIGNAL** 💥\n━━━━━━━━━━━━━━━━\n🗓 Period : ${currentIssue}\n🎰 Pick   : ${data.last_pred.toUpperCase()}\n🎲 Status : ${statusEmoji} | ${resultText}(${lastRound.number})\n💰 ပွဲစဉ်အမြတ် : **${roundProfit >= 0 ? "+" : ""}${roundProfit.toFixed(2)}** MMK\n💵 စုစုပေါင်း : **${data.totalProfit.toFixed(2)}** MMK\n\n`;
                     
-                    // Save AI log
                     const newLog = { 
                         status: isWin ? "✅" : "❌", 
                         issue: currentIssue.slice(-3), 
@@ -344,7 +341,6 @@ bot.on('message', async (msg) => {
     const text = msg.text;
     let data = getUserData(chatId);
     
-    // Manual bet amount input
     if (data.pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
         const fresh = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
@@ -369,7 +365,6 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // Settings commands
     if (text === "⚙️ Settings") {
         const msg = `⚙️ **Auto Bet Settings**\n━━━━━━━━━━━━━━━━\n📋 Bet Plan: \`${data.betPlan.join(', ')}\`\n🏆 Stop Limit: \`${data.stopLimit}\` win(s)\n⚠️ Loss Start: \`${data.lossStartLimit}\` AI loss(es)\n🤖 Status: ${data.autoBetActive ? "RUNNING ✅" : "STOPPED ⏹️"}`;
         return bot.sendMessage(chatId, msg, settingsMenu);
@@ -397,11 +392,8 @@ bot.on('message', async (msg) => {
         saveUserData(chatId, data);
         
         const firstAmount = data.betPlan[0];
-        const fresh = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
-        const nextIssue = fresh?.data?.list ? (BigInt(fresh.data.list[0].issueNumber) + 1n).toString() : data.nextIssue;
-        
         await bot.sendMessage(chatId, `✅ **Auto Bet Started!**\n\n📋 Bet Plan: ${data.betPlan.join(' → ')}\n🏆 Stop Limit: ${data.stopLimit} win(s)\n⚠️ Loss Start: ${data.lossStartLimit} AI loss(es)\n\n📌 စတင်ထိုးပါမည်: ${data.autoSide === "Big" ? "BIG 🔵" : "SMALL 🔴"} | **${firstAmount} MMK**`);
-        await placeAutoBet(chatId, data.autoSide, firstAmount, 0, nextIssue);
+        await placeAutoBet(chatId, data.autoSide, firstAmount, 0);
         return;
     }
     if (text === "❌ Stop Auto Bet") {
@@ -414,7 +406,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "Main Menu", mainMenu);
     }
     
-    // Handle settings input
     if (data.settingMode) {
         const mode = data.settingMode;
         if (mode === "betplan") {
@@ -447,7 +438,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "Settings updated!", settingsMenu);
     }
     
-    // Main menu commands
     if (text === '/start') {
         data.running = false;
         data.token = null;
@@ -460,7 +450,7 @@ bot.on('message', async (msg) => {
         data.consecutiveWins = 0;
         data.consecutiveLosses = 0;
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ 1-2-3 Rule AI (ရိုးရှင်းသောခန့်မှန်းချက်)\n✅ Loss Start (AI သတ်မှတ်အကြိမ်မှားမှ စထိုး)\n✅ Stop Limit (အနိုင်ပွဲပြည့်ရင်ရပ်)\n✅ Bet Plan အဆင့်လိုက်ထိုး\n✅ Local File ဖြင့် မှတ်တမ်းအမြဲတမ်းသိမ်း\n\n⚙️ **အရင်ဆုံး Setting ချိန်ပါ:**\n1. 🎲 Set Bet Plan\n2. 🛑 Set Stop Limit\n3. ⚠️ Set Loss Start\n\n✅ **ပြီးရင် Start Auto Bet နှိပ်ပါ။**\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 **WinGo Sniper Pro v3.0** 🎯\n\nအင်္ဂါရပ်များ:\n✅ 1-2-3 Rule AI\n✅ Loss Start (AI သတ်မှတ်အကြိမ်မှားမှ စထိုး)\n✅ Stop Limit (အနိုင်ပွဲပြည့်ရင်ရပ်)\n✅ Bet Plan အဆင့်လိုက်ထိုး\n✅ Local File ဖြင့် မှတ်တမ်းအမြဲတမ်းသိမ်း\n\n⚙️ **အရင်ဆုံး Setting ချိန်ပါ:**\n1. 🎲 Set Bet Plan\n2. 🛑 Set Stop Limit\n3. ⚠️ Set Loss Start\n\n✅ **ပြီးရင် Start Auto Bet နှိပ်ပါ။**\n\nဖုန်းနံပါတ် ပေးပါ:", mainMenu);
     }
     if (text === "📜 Bet History") {
         let txt = `📜 **Bet History**\n💰 Total: **${data.totalProfit.toFixed(2)}** MMK\n------------------\n`;
@@ -495,7 +485,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "👋 Logged out. Send /start to login again.");
     }
     
-    // Login flow
     if (/^\d{9,11}$/.test(text) && !data.token) {
         data.tempPhone = text;
         saveUserData(chatId, data);
@@ -529,4 +518,4 @@ bot.on('callback_query', async (query) => {
     await bot.sendMessage(chatId, `💰 **${data.pendingSide === "Big" ? "BIG 🔵" : "SMALL 🔴"}** အတွက် ထိုးမည့်ပမာဏ ရိုက်ထည့်ပါ:`);
 });
 
-console.log("✅ Bot is running - Local JSON File Storage");
+console.log("✅ Bot is running - Fixed Auto Bet");
