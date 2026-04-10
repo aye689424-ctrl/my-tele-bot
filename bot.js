@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-http.createServer((req, res) => { res.end('WinGo Sniper Pro - AI Analyze Ready'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('WinGo Sniper Pro - Hot/Cold Analysis'); }).listen(process.env.PORT || 8080);
 
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
 const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
@@ -89,67 +89,91 @@ function getSideFromNumber(num) {
     return parseInt(num) >= 5 ? "Big" : "Small";
 }
 
-function runAI(history) {
-    const resArr = history.map(i => getSideFromNumber(i.number));
-    let streak = 1;
-    let currentSide = resArr[0];
-    for(let i = 1; i < resArr.length; i++) {
-        if(resArr[i] === currentSide) streak++;
-        else break;
-    }
-
-    let prediction = null;
-    if(streak === 1) prediction = currentSide;
-    else if(streak === 2) prediction = currentSide;
-    else if(streak >= 3) prediction = currentSide === "Big" ? "Small" : "Big";
-    
-    return { side: prediction || "Big", dragon: streak };
-}
-
-// ========== 🆕 AI API ခေါ်ပြီး အကောင်းဆုံးခန့်မှန်းခြင်း (ခလုတ်နှိပ်မှသုံးမည်) ==========
+// ========== 🆕 AI API ခေါ်ပြီး Hot/Cold ခွဲခြမ်းစိတ်ဖြာခြင်း ==========
 async function analyzeBestBet(chatId) {
     const data = getUserData(chatId);
-    const loadingMsg = await bot.sendMessage(chatId, "⏳ API မှ ဒေတာများ ခွဲခြမ်းစိတ်ဖြာနေပါသည်...");
+    const loadingMsg = await bot.sendMessage(chatId, "⏳ API မှ Hot/Cold Data များ ခွဲခြမ်းစိတ်ဖြာနေပါသည်...");
 
     try {
-        // API ခေါ်မယ် (Token မရှိရင်လည်း public data ရတတ်တယ်)
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, data.token || "");
+        // 1. Statistics API ခေါ်မယ် (Hot/Cold Data အတွက်)
+        // ဒီ API Endpoint က ဂဏန်းတွေရဲ့ Frequency, Missing စာရင်းတွေပေးတယ်။
+        const statsRes = await callApi("GetGameStatistics", { 
+            typeId: 30,
+            gameType: 2 
+        }, data.token || "");
         
-        if (res?.msgCode === 0 && res.data?.list?.length > 10) {
-            const history = res.data.list;
+        // 2. နောက်ဆုံးရလဒ် ရယူရန် History API ခေါ်မယ်
+        const historyRes = await callApi("GetNoaverageEmerdList", { 
+            pageNo: 1, 
+            pageSize: 50, 
+            typeId: 30 
+        }, data.token || "");
+
+        if (statsRes?.msgCode === 0 && historyRes?.msgCode === 0) {
             
-            // 1. နောက်ဆုံးပွဲစဉ် အချက်အလက်
-            const lastItem = history[0];
-            const currentIssue = lastItem.issueNumber;
-            const lastNumber = lastItem.number;
+            // --- Hot/Cold Data Processing ---
+            const freqData = statsRes.data.find(d => d.type === 1); // Frequency
+            const missingData = statsRes.data.find(d => d.type === 2); // Missing
+            
+            let hotNumbers = [];
+            let coldNumbers = [];
+            
+            if (freqData) {
+                // Frequency အများဆုံး ၃ လုံး (Hot)
+                const freqList = [];
+                for(let i=0; i<=9; i++) freqList.push({ num: i, val: freqData[`number_${i}`] });
+                freqList.sort((a,b) => b.val - a.val);
+                hotNumbers = freqList.slice(0, 3).map(i => i.num);
+            }
+
+            if (missingData) {
+                // Missing အများဆုံး (မကျတာကြာဆုံး) ၃ လုံး (Cold)
+                const missList = [];
+                for(let i=0; i<=9; i++) missList.push({ num: i, val: missingData[`number_${i}`] });
+                missList.sort((a,b) => b.val - a.val);
+                coldNumbers = missList.slice(0, 3).map(i => i.num);
+            }
+
+            // --- History Data Processing ---
+            const history = historyRes.data.list;
+            const lastRound = history[0];
+            const currentIssue = lastRound.issueNumber;
+            const lastNumber = parseInt(lastRound.number);
             const lastResult = getSideFromNumber(lastNumber);
             
-            // 2. Pattern ခွဲခြမ်းစိတ်ဖြာခြင်း (Dragon Tail)
+            // --- AI Decision Making (Hot/Cold + Streak) ---
             const resultsLast10 = history.slice(0, 10).map(i => getSideFromNumber(i.number));
             let bigCount = resultsLast10.filter(r => r === 'Big').length;
             let smallCount = resultsLast10.filter(r => r === 'Small').length;
             
-            // 3. ပုံမှန် AI တွက်ချက်မှု
-            const aiStandard = runAI(history);
+            // လက်ရှိကျတဲ့ဂဏန်းက Hot လား Cold လား စစ်တယ်
+            const isLastNumberHot = hotNumbers.includes(lastNumber);
+            const isLastNumberCold = coldNumbers.includes(lastNumber);
             
-            // 4. ခန့်မှန်းချက် ဆုံးဖြတ်ခြင်း (Strategy)
-            let finalPrediction = aiStandard.side;
-            let reason = `🤖 AI Default (Streak ${aiStandard.dragon})`;
+            let finalPrediction = lastResult; // Default: နောက်ဆုံးရလဒ်အတိုင်း လိုက်မယ်
+            let reason = "";
             
-            // နည်းဗျူဟာ အကြံပြုချက် - ရလဒ် ၁၀ ခုအတွင်း တစ်ဖက်သတ်ဆန်လွန်းရင် ပြောင်းပြန်လိုက်
-            if (bigCount >= 7) {
-                finalPrediction = "Small";
-                reason = `📉 BIG ဆက်တိုက်ကျပြီး ${bigCount}/10 ဖြစ်နေ၍ ပြောင်းပြန်လိုက်ခြင်း`;
-            } else if (smallCount >= 7) {
-                finalPrediction = "Big";
-                reason = `📈 SMALL ဆက်တိုက်ကျပြီး ${smallCount}/10 ဖြစ်နေ၍ ပြောင်းပြန်လိုက်ခြင်း`;
-            } else {
-                // Dragon Logic 3 ကြိမ်ဆက်ရင် ပြောင်းပြန်
-                if (aiStandard.dragon >= 3) {
-                    finalPrediction = aiStandard.side === "Big" ? "Small" : "Big";
-                    reason = `🐉 ${aiStandard.dragon} ပွဲဆက်နေပြီဖြစ်၍ ပြောင်းပြန်ခန့်မှန်းခြင်း`;
+            // 🔥 Hot/Cold Strategy စတင်
+            if (isLastNumberCold) {
+                // မကျတာကြာတဲ့ဂဏန်း ခုမှကျလာရင် Trend ပြောင်းနိုင်တယ်
+                finalPrediction = lastResult === "Big" ? "Small" : "Big";
+                reason = `❄️ Cold Number (${lastNumber}) ခုမှကျလာ၍ Trend ပြောင်းနိုင်ခြေ များပါသည်။`;
+            } 
+            else if (isLastNumberHot) {
+                // Hot ဖြစ်နေတဲ့ဂဏန်း ဆက်ကျရင် Trend ဆက်ဖို့ များတယ်
+                finalPrediction = lastResult;
+                reason = `🔥 Hot Number (${lastNumber}) ဆက်ကျနေ၍ Trend ဆက်လက်အားကောင်းနိုင်ပါသည်။`;
+            }
+            else {
+                // Normal Logic
+                if (bigCount >= 7) {
+                    finalPrediction = "Small";
+                    reason = `📊 BIG ${bigCount}/10 ဖြင့် ပြင်းထန်နေ၍ ပြောင်းပြန် ခန့်မှန်းပါသည်။`;
+                } else if (smallCount >= 7) {
+                    finalPrediction = "Big";
+                    reason = `📊 SMALL ${smallCount}/10 ဖြင့် ပြင်းထန်နေ၍ ပြောင်းပြန် ခန့်မှန်းပါသည်။`;
                 } else {
-                    reason = `✨ ပုံမှန် Trend အတိုင်း လိုက်ခန့်မှန်းခြင်း`;
+                    reason = `📈 ပုံမှန် Trend အတိုင်း လိုက်ခန့်မှန်းပါသည်။`;
                 }
             }
 
@@ -158,23 +182,21 @@ async function analyzeBestBet(chatId) {
             const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit' });
 
             // သုံးသပ်ချက် Message ဖန်တီးခြင်း
-            let analysisMsg = `🧠 **API AI ခန့်မှန်းချက်** 🧠\n`;
+            let analysisMsg = `🧠 **API AI Hot/Cold ခန့်မှန်းချက်** 🧠\n`;
             analysisMsg += `━━━━━━━━━━━━━━━━\n`;
             analysisMsg += `📊 **လက်ရှိ ပွဲစဉ်:** ${currentIssue}\n`;
             analysisMsg += `🎲 **နောက်ဆုံးရလဒ်:** ${lastResult} (${lastNumber})\n`;
             analysisMsg += `━━━━━━━━━━━━━━━━\n`;
-            analysisMsg += `📈 **ခွဲခြမ်းစိတ်ဖြာချက်:**\n`;
-            analysisMsg += `• နောက်ဆုံး ၁၀ ပွဲ: 🔵 BIG ${bigCount} | 🔴 SMALL ${smallCount}\n`;
-            analysisMsg += `• လက်ရှိ ပွဲဆက်: ${aiStandard.dragon} ပွဲဆက်\n`;
+            analysisMsg += `📈 **Hot/Cold ခွဲခြမ်းစိတ်ဖြာချက်:**\n`;
+            analysisMsg += `• 🔥 Hot Numbers: ${hotNumbers.join(', ')}\n`;
+            analysisMsg += `• ❄️ Cold Numbers: ${coldNumbers.join(', ')}\n`;
             analysisMsg += `• ${reason}\n`;
             analysisMsg += `━━━━━━━━━━━━━━━━\n`;
             analysisMsg += `🚀 **နောက်ပွဲစဉ်:** ${nextIssueShort} (${mmTime})\n`;
             analysisMsg += `💡 **အကြံပြုထိုးသွင်းရန်:** ${finalPrediction === "Big" ? "🔵 BIG (ကြီး)" : "🔴 SMALL (သေး)"}\n`;
 
-            // Loading message ကိုဖျက်ပြီး အသစ်ပို့မယ် (သို့မဟုတ် edit လုပ်မယ်)
             await bot.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
             
-            // Inline ခလုတ် ထည့်ပေးမယ် (ကိုယ်တိုင်ထိုးရန်)
             const inlineKeyboard = {
                 reply_markup: {
                     inline_keyboard: [
@@ -182,7 +204,7 @@ async function analyzeBestBet(chatId) {
                             { text: `💰 ${finalPrediction === "Big" ? "BIG (ကြီး)" : "SMALL (သေး)"} ထိုးမည်`, callback_data: `bestbet_${finalPrediction}` }
                         ],
                         [
-                            { text: "🔄 ပြန်လည်စစ်ဆေးမည်", callback_data: "refresh_analysis" }
+                            { text: "🔄 Hot/Cold ပြန်စစ်မည်", callback_data: "refresh_analysis" }
                         ]
                     ]
                 }
@@ -445,7 +467,7 @@ const mainMenu = {
             ["🚀 Start Auto", "🛑 Stop Auto"],
             ["⚙️ Settings", "📊 Status"],
             ["📜 Bet History", "📈 AI History"],
-            ["🧠 AI ခန့်မှန်း (API Analyze)", "🚪 Logout"] // 🆕 ခလုတ်အသစ်
+            ["🧠 AI Hot/Cold ခန့်မှန်း", "🚪 Logout"] // 🆕 ခလုတ်အသစ်
         ],
         resize_keyboard: true
     }
@@ -506,7 +528,7 @@ bot.on('message', async (msg) => {
         data.autoMode = null;
         data.manualBetLock = false;
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro - AI Analyze Ready 🎯\n\nအင်္ဂါရပ်အသစ်:\n🧠 AI ခန့်မှန်းချက်ကို API မှ တိုက်ရိုက်ခွဲခြမ်းစိတ်ဖြာနိုင်ပါပြီ။\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro - Hot/Cold Analysis 🎯\n\nအင်္ဂါရပ်အသစ်:\n🧠 Hot/Cold Numbers ခွဲခြမ်းစိတ်ဖြာနိုင်ပါပြီ။\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
 
     if (text === "🚀 Start Auto") {
@@ -544,8 +566,8 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "🛑 Auto Bet Stopped!", mainMenu);
     }
 
-    // 🆕 AI API ခေါ် ခန့်မှန်းချက်အသစ်
-    if (text === "🧠 AI ခန့်မှန်း (API Analyze)") {
+    // 🆕 AI Hot/Cold ခေါ် ခန့်မှန်းချက်အသစ်
+    if (text === "🧠 AI Hot/Cold ခန့်မှန်း") {
         await analyzeBestBet(chatId);
         return;
     }
@@ -671,7 +693,7 @@ bot.on('message', async (msg) => {
             delete data.tempPhone;
             saveUserData(chatId, data);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, "✅ Login Success!\n\nStart Auto နှိပ်ပြီး Mode ရွေးချယ်ပါ။\n🧠 AI ခန့်မှန်းချက်အသစ်အတွက် 'AI ခန့်မှန်း (API Analyze)' ကိုနှိပ်ပါ။", mainMenu);
+            await bot.sendMessage(chatId, "✅ Login Success!\n\nStart Auto နှိပ်ပြီး Mode ရွေးချယ်ပါ။\n🧠 Hot/Cold ခွဲခြမ်းစိတ်ဖြာရန် 'AI Hot/Cold ခန့်မှန်း' ကိုနှိပ်ပါ။", mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed!");
             delete data.tempPhone;
@@ -710,4 +732,4 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-console.log("✅ Bot running - AI API Analyze Feature Enabled");
+console.log("✅ Bot running - Hot/Cold Analysis Feature Enabled");
