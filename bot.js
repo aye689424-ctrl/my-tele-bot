@@ -106,44 +106,46 @@ function getSideFromNumber(num) {
     return parseInt(num) >= 5 ? "Big" : "Small";
 }
 
+// 🆕 AI Logic အသစ်
 function runAI(history) {
     const resArr = history.map(i => getSideFromNumber(i.number));
-    
     let streak = 1;
-    let currentSide = resArr[0];
+    let currentSide = resArr[0]; // နောက်ဆုံးထွက်ထားတဲ့ဘက်
+    
     for(let i = 1; i < resArr.length; i++) {
         if(resArr[i] === currentSide) streak++;
         else break;
     }
-    
+
     let prediction = null;
     let reason = "";
-    
+
     if (currentSide === "Big") {
-        if (streak === 1) {
+        // BIG ၁၊ ၂၊ ၃ ကြိမ်ကျလျှင် SMALL ထိုး
+        if (streak <= 3) {
             prediction = "Small";
-            reason = "BIG ၁ ကြိမ်ထွက် → SMALL ပြောင်းထိုး";
-        } else if (streak === 2) {
-            prediction = "Small";
-            reason = "BIG ၂ ကြိမ်ထွက် → SMALL ဆက်ထိုး";
-        } else {
+            reason = `BIG ${streak} ကြိမ်ထွက် → SMALL ထိုး`;
+        } 
+        // ၄ ကြိမ်နှင့်အထက်ဆိုလျှင် BIG လိုက်ထိုး (Dragon)
+        else {
             prediction = "Big";
             reason = `BIG ${streak} ကြိမ်ထွက် → BIG လိုက်ထိုး (Dragon)`;
         }
-    } else {
-        if (streak === 1) {
+    } 
+    else if (currentSide === "Small") {
+        // SMALL ၁၊ ၂၊ ၃ ကြိမ်ကျလျှင် BIG ထိုး
+        if (streak <= 3) {
             prediction = "Big";
-            reason = "SMALL ၁ ကြိမ်ထွက် → BIG ပြောင်းထိုး";
-        } else if (streak === 2) {
-            prediction = "Big";
-            reason = "SMALL ၂ ကြိမ်ထွက် → BIG ဆက်ထိုး";
-        } else {
+            reason = `SMALL ${streak} ကြိမ်ထွက် → BIG ထိုး`;
+        } 
+        // ၄ ကြိမ်နှင့်အထက်ဆိုလျှင် SMALL လိုက်ထိုး (Dragon)
+        else {
             prediction = "Small";
             reason = `SMALL ${streak} ကြိမ်ထွက် → SMALL လိုက်ထိုး (Dragon)`;
         }
     }
-    
-    return { side: prediction, dragon: streak, reason: reason };
+
+    return { side: prediction || "Big", dragon: streak, reason: reason };
 }
 
 // ========== နောက်ပွဲစဉ် ရယူခြင်း ==========
@@ -269,7 +271,7 @@ async function getEmerdListPrediction(chatId, token) {
     return { prediction: "Big", reason: "ပုံသေ BIG ထိုးမည်" };
 }
 
-// ========== 🆕 AI History Formatting (၁၀ ခု၊ ဘောလုံးမပါ) ==========
+// ========== AI History Formatting (၁၀ ခု၊ ဘောလုံးမပါ) ==========
 function formatAIHistoryForVIP(aiLogs, limit = 10) {
     if (!aiLogs || aiLogs.length === 0) return "📊 မှတ်တမ်းမရှိသေးပါ";
     
@@ -277,7 +279,6 @@ function formatAIHistoryForVIP(aiLogs, limit = 10) {
     let winCount = recentLogs.filter(l => l.status === "✅").length;
     let winRate = ((winCount / recentLogs.length) * 100).toFixed(1);
     
-    // Big နံပါတ်တွေ နဲ့ Small နံပါတ်တွေ ခွဲထုတ်
     const bigNumbers = recentLogs.filter(l => l.result === "Big").map(l => l.number).join(', ');
     const smallNumbers = recentLogs.filter(l => l.result === "Small").map(l => l.number).join(', ');
     
@@ -621,7 +622,7 @@ bot.on('message', async (msg) => {
         data.running = false; data.token = null; data.autoRunning = false; data.manualBetLock = false;
         data.totalWins = 0;
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro 🎯\n\n🤖 AI Logic:\n• BIG ၁/၂ ကြိမ် → SMALL ထိုး\n• BIG ၃+ ကြိမ် → BIG လိုက်\n• SMALL ၁/၂ ကြိမ် → BIG ထိုး\n• SMALL ၃+ ကြိမ် → SMALL လိုက်\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro - AI Logic အသစ် 🎯\n\n🤖 AI Logic:\n• BIG ၁-၃ ကြိမ် → SMALL ထိုး\n• BIG ၄+ ကြိမ် → BIG လိုက်ထိုး (Dragon)\n• SMALL ၁-၃ ကြိမ် → BIG ထိုး\n• SMALL ၄+ ကြိမ် → SMALL လိုက်ထိုး (Dragon)\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
 
     if (text === "🚀 Start Auto") {
@@ -642,7 +643,7 @@ bot.on('message', async (msg) => {
         data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false;
         data.totalWins = 0;
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, `✅ AI Correction Started!\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nLoss Start: ${data.lossStartLimit} ပွဲဆက်မှား`, mainMenu);
+        await bot.sendMessage(chatId, `✅ AI Correction Started!\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nLoss Start: ${data.lossStartLimit} ပွဲဆက်မှား\n\nAI Logic: ၁-၃ ကြိမ် → ပြောင်းပြန် / ၄+ ကြိမ် → Dragon`, mainMenu);
     }
 
     if (text === "🧠 GetEmerdList Auto") {
@@ -678,7 +679,7 @@ bot.on('message', async (msg) => {
     if (text === "⚠️ Set Loss Start") {
         data.settingMode = "lossstart";
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, `⚠️ Loss Start Limit ထည့်ပါ (AI ဘယ်နှစ်ပွဲမှားရင် စထိုးမလဲ)\n\n�က်ရှိ: ${data.lossStartLimit} ပွဲ`);
+        return bot.sendMessage(chatId, `⚠️ Loss Start Limit ထည့်ပါ (AI ဘယ်နှစ်ပွဲမှားရင် စထိုးမလဲ)\n\nလက်ရှိ: ${data.lossStartLimit} ပွဲ`);
     }
 
     if (text === "🔙 Main Menu") {
@@ -760,7 +761,7 @@ bot.on('message', async (msg) => {
             data.phone = data.tempPhone; data.running = true; delete data.tempPhone;
             saveUserData(chatId, data);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, "✅ Login Success!\n\nAI History ၁၀ ခု ပြသပါမည်။", mainMenu);
+            await bot.sendMessage(chatId, "✅ Login Success!\n\nAI Logic အသစ်: ၁-၃ ကြိမ် → ပြောင်းပြန် / ၄+ ကြိမ် → Dragon", mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed!"); delete data.tempPhone; saveUserData(chatId, data);
         }
@@ -798,7 +799,7 @@ http.createServer((req, res) => {
             try { bot.processUpdate(JSON.parse(body)); res.writeHead(200); res.end(JSON.stringify({ ok: true })); }
             catch (e) { res.writeHead(400); res.end(); }
         });
-    } else { res.writeHead(200); res.end('WinGo Sniper Pro'); }
+    } else { res.writeHead(200); res.end('WinGo Sniper Pro - AI Logic Updated'); }
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-console.log("✅ Bot initialized - AI History 10 items, Big/Small text only");
+console.log("✅ Bot initialized - AI Logic: 1-3 Opposite, 4+ Dragon");
