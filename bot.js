@@ -50,7 +50,14 @@ function getUserData(chatId) {
             last_issue: null, last_pred: null,
             manualBetLock: false, manualBetIssue: null,
             betHistory: [],
-            aiLogs: []
+            aiLogs: [],
+            // GetEmerdList Auto အတွက် သီးသန့် Data
+            emerdListData: {
+                hotNumbers: [],
+                coldNumbers: [],
+                lastAnalysis: null,
+                lastReason: ""
+            }
         };
         saveAllData(allUsers);
     }
@@ -114,10 +121,9 @@ function runAI(history) {
     return { side: prediction || "Big", dragon: streak };
 }
 
-// ========== 🆕 နောက်ပွဲစဉ် တိကျစွာ ရယူခြင်း ==========
+// ========== နောက်ပွဲစဉ် တိကျစွာ ရယူခြင်း ==========
 async function getNextIssue(chatId, token) {
     try {
-        // GetGameIssue API က လက်ရှိ ထိုးလို့ရတဲ့ ပွဲစဉ်ကို တိကျစွာ ပေးပါတယ်
         const res = await callApi("GetGameIssue", { typeId: 30 }, token);
         if (res?.msgCode === 0 && res.data?.issueNumber) {
             return res.data.issueNumber;
@@ -126,7 +132,6 @@ async function getNextIssue(chatId, token) {
         console.error('GetGameIssue error:', e.message);
     }
     
-    // Fallback: နောက်ဆုံးပွဲစဉ်ကနေ +1 တွက်
     const historyRes = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, token);
     if (historyRes?.data?.list?.length > 0) {
         return (BigInt(historyRes.data.list[0].issueNumber) + 1n).toString();
@@ -136,7 +141,87 @@ async function getNextIssue(chatId, token) {
     return null;
 }
 
-// ========== GetEmerdList API ခေါ်ပြီး Hot/Cold ခွဲခြမ်းစိတ်ဖြာခြင်း ==========
+// ========== 🆕 GetEmerdList Auto အတွက် Hot/Cold Analysis ==========
+async function getEmerdListPrediction(chatId, token) {
+    try {
+        const statsRes = await callApi("GetEmerdList", { typeId: 30, gameType: 2 }, token);
+        const historyRes = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, token);
+
+        if (statsRes?.msgCode === 0 && historyRes?.msgCode === 0) {
+            
+            const freqData = statsRes.data.find(d => d.type === 1);
+            const missingData = statsRes.data.find(d => d.type === 2);
+            
+            let hotNumbers = [];
+            let coldNumbers = [];
+            
+            if (freqData) {
+                const freqList = [];
+                for(let i=0; i<=9; i++) freqList.push({ num: i, val: freqData[`number_${i}`] });
+                freqList.sort((a,b) => b.val - a.val);
+                hotNumbers = freqList.slice(0, 3).map(i => i.num);
+            }
+
+            if (missingData) {
+                const missList = [];
+                for(let i=0; i<=9; i++) missList.push({ num: i, val: missingData[`number_${i}`] });
+                missList.sort((a,b) => b.val - a.val);
+                coldNumbers = missList.slice(0, 3).map(i => i.num);
+            }
+
+            const history = historyRes.data.list;
+            const lastRound = history[0];
+            const lastNumber = parseInt(lastRound.number);
+            const lastResult = getSideFromNumber(lastNumber);
+            
+            const resultsLast10 = history.slice(0, 10).map(i => getSideFromNumber(i.number));
+            let bigCount = resultsLast10.filter(r => r === 'Big').length;
+            let smallCount = resultsLast10.filter(r => r === 'Small').length;
+            
+            const isLastNumberHot = hotNumbers.includes(lastNumber);
+            const isLastNumberCold = coldNumbers.includes(lastNumber);
+            
+            let finalPrediction = lastResult;
+            let reason = "";
+            
+            if (isLastNumberCold) {
+                finalPrediction = lastResult === "Big" ? "Small" : "Big";
+                reason = `❄️ Cold Number (${lastNumber}) ဖြစ်နေ၍ Trend ပြောင်းနိုင်ခြေ များပါသည်။ ပြောင်းပြန်ထိုးပါမည်။`;
+            } else if (isLastNumberHot) {
+                finalPrediction = lastResult;
+                reason = `🔥 Hot Number (${lastNumber}) ဆက်ကျနေ၍ Trend ဆက်လက်အားကောင်းနိုင်ပါသည်။ ဆက်လိုက်ထိုးပါမည်။`;
+            } else {
+                if (bigCount >= 7) {
+                    finalPrediction = "Small";
+                    reason = `📊 BIG ${bigCount}/10 ဖြင့် ပြင်းထန်နေ၍ ပြောင်းပြန်ထိုးပါမည်။`;
+                } else if (smallCount >= 7) {
+                    finalPrediction = "Big";
+                    reason = `📊 SMALL ${smallCount}/10 ဖြင့် ပြင်းထန်နေ၍ ပြောင်းပြန်ထိုးပါမည်။`;
+                } else {
+                    reason = `📈 ပုံမှန် Trend အတိုင်း လိုက်ခန့်မှန်းပါသည်။ ${lastResult} ဆက်ထိုးပါမည်။`;
+                }
+            }
+            
+            // Save to user data for later use
+            const data = getUserData(chatId);
+            data.emerdListData = {
+                hotNumbers,
+                coldNumbers,
+                lastAnalysis: new Date().toISOString(),
+                lastReason: reason
+            };
+            saveUserData(chatId, data);
+            
+            return { prediction: finalPrediction, reason };
+        }
+    } catch (e) {
+        console.error('GetEmerdList error:', e.message);
+    }
+    
+    return { prediction: "Big", reason: "API ခေါ်မရ၍ ပုံသေ BIG ထိုးပါမည်။" };
+}
+
+// ========== GetEmerdList ခန့်မှန်းချက် (Manual အတွက် UI) ==========
 async function analyzeBestBet(chatId) {
     const data = getUserData(chatId);
     const loadingMsg = await bot.sendMessage(chatId, "⏳ GetEmerdList API မှ Hot/Cold Data များ ခွဲခြမ်းစိတ်ဖြာနေပါသည်...");
@@ -258,7 +343,7 @@ async function analyzeBestBet(chatId) {
     } catch (error) {
         console.error('Analysis Error:', error);
         await bot.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
-        await bot.sendMessage(chatId, "❌ ခွဲခြမ်းစိတ်ဖြာမှု မအောင်မြင်ပါ။ Error: " + error.message);
+        await bot.sendMessage(chatId, "❌ ခွဲခြမ်းစိတ်ဖြာမှု မအောင်မြင်ပါ။");
     }
 }
 
@@ -296,8 +381,8 @@ function formatFullAIHistory(aiLogs) {
     return txt;
 }
 
-// ========== 🆕 အမြန်ထိုးခြင်း Function (Fallback စနစ်ဖြင့်) ==========
-async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto = true) {
+// ========== အမြန်ထိုးခြင်း Function (Fallback စနစ်ဖြင့်) ==========
+async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto = true, betReason = "") {
     const data = getUserData(chatId);
     if (!data || !data.token) return false;
 
@@ -322,7 +407,6 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
             isAgree: true
         };
 
-        await bot.sendMessage(chatId, `🔍 ထိုးမည့် Issue: ${currentTargetIssue.slice(-5)} | ${side} | ${amount} MMK`);
         const res = await callApi("GameBetting", betPayload, data.token);
         
         if (res?.msgCode === 0 || res?.msg === "Bet success") {
@@ -331,6 +415,7 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
             const newBet = {
                 issue: currentTargetIssue.slice(-5), side, amount, status: "⏳ Pending", pnl: 0,
                 isAuto: isAuto, autoStep: isAuto ? stepIndex : -1,
+                reason: betReason,
                 timestamp: new Date().toISOString()
             };
             data.betHistory.unshift(newBet);
@@ -340,13 +425,18 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
             }
             saveUserData(chatId, data);
             
-            const typeText = isAuto ? "[AUTO]" : "[MANUAL]";
+            const typeText = isAuto ? `[AUTO ${data.autoMode || ''}]` : "[MANUAL]";
             const sideText = side === "Big" ? "BIG 🔵" : "SMALL 🔴";
-            await bot.sendMessage(chatId, `✅ ${typeText} ပွဲစဉ်: ${currentTargetIssue.slice(-5)} | ${sideText} | ${amount} MMK ထိုးပြီး!`);
+            
+            let successMsg = `✅ ${typeText} ပွဲစဉ်: ${currentTargetIssue.slice(-5)} | ${sideText} | ${amount} MMK ထိုးပြီး!`;
+            if (betReason) {
+                successMsg += `\n\n📝 **ထိုးရသည့်အကြောင်း:** ${betReason}`;
+            }
+            
+            await bot.sendMessage(chatId, successMsg);
             return true;
             
         } else if (res?.msg === "The current period is settled" || res?.msg?.includes("settled")) {
-            // ပွဲပိတ်သွားရင် နောက်ပွဲစဉ်ကို ပြောင်းထိုး
             retryCount++;
             await bot.sendMessage(chatId, `⚠️ ပွဲစဉ် ${currentTargetIssue.slice(-5)} ပိတ်သွားပါပြီ။ နောက်ပွဲစဉ် ပြောင်းထိုးပါမည်...`);
             
@@ -386,7 +476,6 @@ async function monitoringLoop(chatId) {
                 const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
                 const realNumber = lastRound.number;
                 
-                // Get accurate next issue
                 const nextIssue = await getNextIssue(chatId, data.token);
                 if (!nextIssue) continue;
 
@@ -469,30 +558,43 @@ async function monitoringLoop(chatId) {
                 data.last_pred = ai.side;
                 saveUserData(chatId, data);
 
-                // Auto Bet Trigger
+                // 🆕 Auto Bet Trigger (Mode 3 မျိုး)
                 if (data.autoRunning && !data.manualBetLock) {
                     let shouldBet = false;
                     let betSide = null;
                     let betAmount = 0;
+                    let betReason = "";
 
                     if (data.autoMode === 'follow') {
                         betSide = realSide;
                         betAmount = data.betPlan[data.currentBetStep];
                         shouldBet = true;
+                        betReason = `🔄 Follow Mode - နောက်ဆုံးရလဒ် ${realSide} ကို လိုက်ထိုးခြင်း`;
                         await bot.sendMessage(chatId, `🔄 [Follow Mode] နောက်ဆုံးရလဒ် ${betSide} ကို လိုက်ထိုးပါမည်။`);
+                        
                     } else if (data.autoMode === 'ai_correction') {
                         if (data.consecutiveLosses >= data.lossStartLimit) {
                             betSide = data.last_pred;
                             betAmount = data.betPlan[data.currentBetStep];
                             shouldBet = true;
+                            betReason = `🤖 AI Correction - AI ခန့်မှန်းချက် ${data.consecutiveLosses} ပွဲဆက်မှား၍ စတင်ထိုးခြင်း`;
                             await bot.sendMessage(chatId, `🤖 [AI Correction] AI ${data.consecutiveLosses} ပွဲဆက်မှား၍ Auto Bet စတင်ပါပြီ။`);
                         } else {
                             await bot.sendMessage(chatId, `⏳ [AI Correction] AI အမှား ${data.consecutiveLosses}/${data.lossStartLimit}။ စောင့်ဆိုင်းနေပါသည်...`);
                         }
+                        
+                    } else if (data.autoMode === 'emerdlist') {
+                        // 🆕 GetEmerdList Auto Mode
+                        const emerdResult = await getEmerdListPrediction(chatId, data.token);
+                        betSide = emerdResult.prediction;
+                        betAmount = data.betPlan[data.currentBetStep];
+                        shouldBet = true;
+                        betReason = `🧠 GetEmerdList - ${emerdResult.reason}`;
+                        await bot.sendMessage(chatId, `🧠 [GetEmerdList] Hot/Cold Analysis အရ ${betSide} ထိုးပါမည်။\n📝 ${emerdResult.reason}`);
                     }
 
                     if (shouldBet && betSide) {
-                        await placeBetNow(chatId, betSide, betAmount, nextIssue, data.currentBetStep, true);
+                        await placeBetNow(chatId, betSide, betAmount, nextIssue, data.currentBetStep, true, betReason);
                     }
                 }
 
@@ -500,7 +602,9 @@ async function monitoringLoop(chatId) {
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
                 let modeText = "⚪️ Manual Only";
                 if (data.autoRunning) {
-                    modeText = data.autoMode === 'follow' ? "🟢 Follow Mode" : "🟡 AI Correction";
+                    if (data.autoMode === 'follow') modeText = "🟢 Follow Mode";
+                    else if (data.autoMode === 'ai_correction') modeText = "🟡 AI Correction";
+                    else if (data.autoMode === 'emerdlist') modeText = "🧠 GetEmerdList Auto";
                 }
                 const aiHistoryText = formatAIHistoryForVIP(data.aiLogs, 10);
                 
@@ -559,6 +663,7 @@ const autoModeMenu = {
         keyboard: [
             ["🔄 Follow Pattern (နောက်လိုက်ထိုး)"],
             ["🤖 AI Correction (AIမှားမှထိုး)"],
+            ["🧠 GetEmerdList Auto (Hot/Cold)"],
             ["🔙 Main Menu"]
         ],
         resize_keyboard: true
@@ -582,7 +687,7 @@ bot.on('message', async (msg) => {
             saveUserData(chatId, data);
             return;
         }
-        await placeBetNow(chatId, data.pendingSide, amount, nextIssue, -1, false);
+        await placeBetNow(chatId, data.pendingSide, amount, nextIssue, -1, false, "ကိုယ်တိုင်ထိုးခြင်း");
         data.pendingSide = null;
         saveUserData(chatId, data);
         return;
@@ -599,7 +704,7 @@ bot.on('message', async (msg) => {
         data.autoMode = null;
         data.manualBetLock = false;
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro - GetEmerdList Analysis 🎯\n\n🧠 GetEmerdList API မှ Hot/Cold Numbers များကို ခွဲခြမ်းစိတ်ဖြာနိုင်ပါပြီ။\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro - GetEmerdList Auto 🎯\n\n🧠 GetEmerdList Auto Mode အသစ် ထည့်သွင်းထားပါပြီ။\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
 
     if (text === "🚀 Start Auto") {
@@ -615,7 +720,7 @@ bot.on('message', async (msg) => {
         data.consecutiveLosses = 0;
         data.manualBetLock = false;
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, "✅ Follow Pattern Mode Started!\n\nStop Limit: " + data.stopLimit + " နိုင်ရင်ရပ်မည်။", mainMenu);
+        await bot.sendMessage(chatId, "✅ Follow Pattern Mode Started!\n\nပွဲအသစ်စတာနဲ့ နောက်ဆုံးရလဒ်ကို ချက်ချင်းလိုက်ထိုးပါမည်။\nStop Limit: " + data.stopLimit + " နိုင်ရင်ရပ်မည်။", mainMenu);
     }
 
     if (text === "🤖 AI Correction (AIမှားမှထိုး)") {
@@ -626,7 +731,18 @@ bot.on('message', async (msg) => {
         data.consecutiveLosses = 0;
         data.manualBetLock = false;
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, "✅ AI Correction Mode Started!\n\nLoss Start: " + data.lossStartLimit + " ပွဲဆက်မှားမှ စထိုးမည်။", mainMenu);
+        await bot.sendMessage(chatId, "✅ AI Correction Mode Started!\n\nAI ခန့်မှန်းချက် " + data.lossStartLimit + " ပွဲဆက်မှားမှ စတင်ထိုးပါမည်။\nStop Limit: " + data.stopLimit + " နိုင်ရင်ရပ်မည်။", mainMenu);
+    }
+
+    if (text === "🧠 GetEmerdList Auto (Hot/Cold)") {
+        data.autoRunning = true;
+        data.autoMode = 'emerdlist';
+        data.currentBetStep = 0;
+        data.consecutiveWins = 0;
+        data.consecutiveLosses = 0;
+        data.manualBetLock = false;
+        saveUserData(chatId, data);
+        await bot.sendMessage(chatId, "✅ GetEmerdList Auto Mode Started!\n\nHot/Cold Numbers များကို ခွဲခြမ်းစိတ်ဖြာပြီး အလိုအလျောက်ထိုးပေးပါမည်။\nထိုးရသည့်အကြောင်းကိုလည်း ပြောပြပါမည်။\nStop Limit: " + data.stopLimit + " နိုင်ရင်ရပ်မည်။", mainMenu);
     }
 
     if (text === "🛑 Stop Auto") {
@@ -645,7 +761,9 @@ bot.on('message', async (msg) => {
     if (text === "📊 Status") {
         let modeText = "⚪️ Manual Only";
         if (data.autoRunning) {
-            modeText = data.autoMode === 'follow' ? "🟢 Follow Mode" : "🟡 AI Correction";
+            if (data.autoMode === 'follow') modeText = "🟢 Follow Mode";
+            else if (data.autoMode === 'ai_correction') modeText = "🟡 AI Correction";
+            else if (data.autoMode === 'emerdlist') modeText = "🧠 GetEmerdList Auto";
         }
         let status = `📊 Current Status\n━━━━━━━━━━━━━━━━\n`;
         status += `🤖 Mode: ${modeText}\n`;
@@ -688,6 +806,9 @@ bot.on('message', async (msg) => {
         data.betHistory.slice(0, 20).forEach(h => {
             const pnl = h.status === "⏳ Pending" ? "" : ` (${h.pnl >= 0 ? "+" : ""}${h.pnl})`;
             txt += `${h.status} | ${h.issue} | ${h.side} | ${h.amount} ${pnl}\n`;
+            if (h.reason) {
+                txt += `   ↳ ${h.reason}\n`;
+            }
         });
         return bot.sendMessage(chatId, txt || "No history.");
     }
@@ -750,7 +871,7 @@ bot.on('message', async (msg) => {
             delete data.tempPhone;
             saveUserData(chatId, data);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, "✅ Login Success!\n\nStart Auto နှိပ်ပြီး Mode ရွေးချယ်ပါ။\n🧠 GetEmerdList ခန့်မှန်းချက်အတွက် 'GetEmerdList ခန့်မှန်း' ကိုနှိပ်ပါ။", mainMenu);
+            await bot.sendMessage(chatId, "✅ Login Success!\n\nAuto Mode ၃ မျိုး ရွေးချယ်နိုင်ပါပြီ။", mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed!");
             delete data.tempPhone;
@@ -809,10 +930,10 @@ http.createServer((req, res) => {
         res.end('pong');
     } else {
         res.writeHead(200);
-        res.end('WinGo Sniper Pro - GetEmerdList Analysis');
+        res.end('WinGo Sniper Pro - GetEmerdList Auto Mode');
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
 });
 
-console.log("✅ Bot initialized - GetEmerdList API Analysis Enabled");
+console.log("✅ Bot initialized - GetEmerdList Auto Mode Enabled");
