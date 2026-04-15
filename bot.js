@@ -44,10 +44,10 @@ function getUserData(chatId) {
             token: null, phone: null, running: false,
             autoRunning: false, autoMode: null,
             betPlan: [10, 30, 60, 90, 150, 250, 400, 650],
-            stopLimit: 3,           // စုစုပေါင်း နိုင်ပွဲအရေအတွက်
-            lossStartLimit: 1,       // AI ဘယ်နှစ်ပွဲမှားရင် စထိုးမလဲ
+            stopLimit: 3,
+            lossStartLimit: 1,
             totalProfit: 0,
-            totalWins: 0,            // 🆕 စုစုပေါင်းနိုင်ပွဲ (Stop Limit အတွက်)
+            totalWins: 0,
             currentBetStep: 0, 
             consecutiveWins: 0, 
             consecutiveLosses: 0,
@@ -58,7 +58,7 @@ function getUserData(chatId) {
             betHistory: [],
             aiLogs: [],
             bettingInProgress: null,
-            settingMode: null,       // 🆕 Setting Mode
+            settingMode: null,
             emerdListData: { hotNumbers: [], coldNumbers: [], lastAnalysis: null, lastReason: "" }
         };
         saveAllData(allUsers);
@@ -121,6 +121,134 @@ function runAI(history) {
     return { side: prediction || "Big", dragon: streak };
 }
 
+// ========== 🆕 AI Loss Streak Analysis Function ==========
+function getAIWorstLossStreak(aiLogs) {
+    if (!aiLogs || aiLogs.length === 0) {
+        return { maxStreak: 0, startIssue: null, endIssue: null, details: [] };
+    }
+    
+    let maxStreak = 0;
+    let currentStreak = 0;
+    let streakStartIndex = -1;
+    let maxStreakStartIndex = -1;
+    let maxStreakEndIndex = -1;
+    let allStreaks = [];
+    
+    for (let i = 0; i < aiLogs.length; i++) {
+        if (aiLogs[i].status === "❌") {
+            if (currentStreak === 0) {
+                streakStartIndex = i;
+            }
+            currentStreak++;
+            
+            if (currentStreak > maxStreak) {
+                maxStreak = currentStreak;
+                maxStreakStartIndex = streakStartIndex;
+                maxStreakEndIndex = i;
+            }
+        } else {
+            if (currentStreak > 0) {
+                allStreaks.push({
+                    streak: currentStreak,
+                    startIssue: aiLogs[streakStartIndex]?.issue,
+                    endIssue: aiLogs[i-1]?.issue,
+                    startPred: aiLogs[streakStartIndex]?.prediction,
+                    endPred: aiLogs[i-1]?.prediction
+                });
+                currentStreak = 0;
+            }
+        }
+    }
+    
+    // Check if still in a loss streak at the end
+    if (currentStreak > 0) {
+        allStreaks.push({
+            streak: currentStreak,
+            startIssue: aiLogs[streakStartIndex]?.issue,
+            endIssue: aiLogs[aiLogs.length-1]?.issue,
+            startPred: aiLogs[streakStartIndex]?.prediction,
+            endPred: aiLogs[aiLogs.length-1]?.prediction
+        });
+        if (currentStreak > maxStreak) {
+            maxStreak = currentStreak;
+            maxStreakStartIndex = streakStartIndex;
+            maxStreakEndIndex = aiLogs.length - 1;
+        }
+    }
+    
+    let worstStreak = null;
+    if (maxStreakStartIndex !== -1 && maxStreakEndIndex !== -1) {
+        worstStreak = {
+            streak: maxStreak,
+            startIssue: aiLogs[maxStreakStartIndex]?.issue,
+            endIssue: aiLogs[maxStreakEndIndex]?.issue,
+            startPred: aiLogs[maxStreakStartIndex]?.prediction,
+            endPred: aiLogs[maxStreakEndIndex]?.prediction,
+            lossDetails: aiLogs.slice(maxStreakStartIndex, maxStreakEndIndex + 1).map(log => ({
+                issue: log.issue,
+                prediction: log.prediction,
+                result: log.result,
+                number: log.number
+            }))
+        };
+    }
+    
+    return { maxStreak, worstStreak, allStreaks };
+}
+
+// ========== 🆕 Format Loss Streak Report ==========
+function formatLossStreakReport(chatId, data) {
+    const analysis = getAIWorstLossStreak(data.aiLogs);
+    
+    if (analysis.maxStreak === 0) {
+        return "✅ AI မှတ်တမ်းတွင် အမှားမရှိသေးပါ။ အားလုံးမှန်နေပါတယ်။";
+    }
+    
+    let report = `📉 **AI အမှားအများဆုံး ပွဲဆက် မှတ်တမ်း**\n`;
+    report += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    report += `🔥 **အဆိုးဆုံး အမှားအဆက်:** ${analysis.maxStreak} ပွဲဆက်\n\n`;
+    
+    if (analysis.worstStreak) {
+        report += `📌 **စတင်သည့်ပွဲ:** ${analysis.worstStreak.startIssue}\n`;
+        report += `📌 **ပြီးဆုံးသည့်ပွဲ:** ${analysis.worstStreak.endIssue}\n`;
+        report += `📌 **ခန့်မှန်းချက်:** ${analysis.worstStreak.startPred} → ${analysis.worstStreak.endPred}\n`;
+        report += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        report += `📋 **အသေးစိတ် မှတ်တမ်း:**\n\n`;
+        
+        analysis.worstStreak.lossDetails.forEach((loss, idx) => {
+            report += `${idx+1}. ပွဲစဉ် ${loss.issue} | ခန့်: ${loss.prediction} | ထွက်: ${loss.result} (${loss.number})\n`;
+        });
+        
+        report += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        report += `💡 **မှတ်ချက်:** ${analysis.maxStreak} ပွဲဆက်မှားပြီးနောက် `;
+        
+        // Check what happened after worst streak
+        const worstEndIndex = data.aiLogs.findIndex(log => log.issue === analysis.worstStreak.endIssue);
+        if (worstEndIndex !== -1 && worstEndIndex + 1 < data.aiLogs.length) {
+            const nextResult = data.aiLogs[worstEndIndex + 1];
+            if (nextResult.status === "✅") {
+                report += `ပွဲစဉ် ${nextResult.issue} တွင် ပြန်မှန်သွားပါသည်။`;
+            } else {
+                report += `ဆက်လက်မှားနေဆဲဖြစ်ပါသည်။`;
+            }
+        } else {
+            report += `လက်ရှိအချိန်အထိ ဆက်လက်မှားနေဆဲဖြစ်ပါသည်။`;
+        }
+    }
+    
+    // Add summary of all streaks
+    if (analysis.allStreaks.length > 1) {
+        report += `\n\n📊 **အခြား အမှားအဆက်များ:**\n`;
+        analysis.allStreaks.forEach((streak, idx) => {
+            if (streak.streak !== analysis.maxStreak) {
+                report += `  • ${streak.streak} ပွဲဆက် (${streak.startIssue} → ${streak.endIssue})\n`;
+            }
+        });
+    }
+    
+    return report;
+}
+
 // ========== နောက်ပွဲစဉ် ရယူခြင်း ==========
 async function getNextIssue(chatId, token) {
     try {
@@ -154,13 +282,13 @@ async function waitForBetWindow(chatId, expectedIssue, maxWaitMs = 10000) {
     
     if (!issueStarted) return false;
     
-    await new Promise(r => setTimeout(r, 5000)); // 5 sec wait
+    await new Promise(r => setTimeout(r, 5000));
     
     const checkRes = await callApi("GetGameIssue", { typeId: 30 }, data.token);
     return checkRes?.msgCode === 0 && checkRes.data?.issueNumber === expectedIssue;
 }
 
-// ========== 🆕 API Sync (နောက်ကွယ်ကနေ ခေါ်) ==========
+// ========== API Sync ==========
 async function syncBetHistoryFromAPI(chatId) {
     const data = getUserData(chatId);
     if (!data || !data.token) return;
@@ -188,7 +316,6 @@ async function syncBetHistoryFromAPI(chatId) {
             }
         });
         
-        // Total Profit နဲ့ Total Wins ပြန်တွက်
         data.totalProfit = data.betHistory.filter(b => b.status !== "⏳ Pending").reduce((sum, b) => sum + (b.pnl || 0), 0);
         data.totalWins = data.betHistory.filter(b => b.status === "✅ WIN" && b.isAuto).length;
         
@@ -246,7 +373,7 @@ async function getEmerdListPrediction(chatId, token) {
 }
 
 // ========== AI History Formatting ==========
-function formatAIHistoryForVIP(aiLogs, limit = 6) {
+function formatAIHistoryForVIP(aiLogs, limit = 50) {
     if (!aiLogs || aiLogs.length === 0) return "📊 မှတ်တမ်းမရှိသေးပါ";
     const recentLogs = aiLogs.slice(0, limit);
     let winCount = recentLogs.filter(l => l.status === "✅").length;
@@ -322,7 +449,6 @@ async function monitoringLoop(chatId) {
         let data = getUserData(chatId);
         if (!data.running) break;
 
-        // 🆕 ပွဲစစ်တိုင်း API Sync လုပ် (နောက်ကွယ်က)
         await syncBetHistoryFromAPI(chatId);
         data = getUserData(chatId);
 
@@ -340,7 +466,6 @@ async function monitoringLoop(chatId) {
                 const realNumber = lastRound.number;
                 const nextIssue = (BigInt(currentIssue) + 1n).toString();
 
-                // Pending Bet Result Check
                 let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === currentIssue.slice(-5));
                 if (pendingBet) {
                     const isWin = pendingBet.side === realSide;
@@ -350,9 +475,8 @@ async function monitoringLoop(chatId) {
                         data.totalProfit += pendingBet.pnl;
                         if (pendingBet.isAuto) {
                             data.consecutiveWins++;
-                            data.totalWins++;  // 🆕 စုစုပေါင်းနိုင်ပွဲ တိုး
+                            data.totalWins++;
                             
-                            // 🆕 Stop Limit စစ်ဆေး (စုစုပေါင်းနိုင်ပွဲ)
                             if (data.totalWins >= data.stopLimit) {
                                 await bot.sendMessage(chatId, `🛑 Stop Limit ပြည့်ပါပြီ! (${data.stopLimit} ပွဲနိုင်)\nစုစုပေါင်းနိုင်ပွဲ: ${data.totalWins} ပွဲ`);
                                 data.autoRunning = false; data.autoMode = null;
@@ -379,7 +503,6 @@ async function monitoringLoop(chatId) {
                     data = getUserData(chatId);
                 }
 
-                // AI Prediction Tracking
                 if (data.last_pred) {
                     const aiCorrect = (data.last_pred === realSide);
                     data.aiLogs.unshift({ status: aiCorrect ? "✅" : "❌", issue: currentIssue.slice(-5), result: realSide, prediction: data.last_pred, number: realNumber });
@@ -389,13 +512,11 @@ async function monitoringLoop(chatId) {
                     data = getUserData(chatId);
                 }
 
-                // New AI Signal
                 const ai = runAI(history);
                 data.last_issue = currentIssue;
                 data.last_pred = ai.side;
                 saveUserData(chatId, data);
 
-                // Auto Bet Trigger
                 if (data.autoRunning && !data.manualBetLock) {
                     let betSide = null, betAmount = data.betPlan[data.currentBetStep], betReason = "";
                     
@@ -426,7 +547,6 @@ async function monitoringLoop(chatId) {
                     }
                 }
 
-                // Send VIP Signal
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
                 let modeText = "⚪️ Manual";
                 if (data.autoRunning) {
@@ -439,7 +559,7 @@ async function monitoringLoop(chatId) {
                 statusMsg += `🗓 Period: ${currentIssue}\n🎲 Result: ${realSide} (${realNumber})\n`;
                 statusMsg += `🤖 AI Pred: ${data.last_pred}\n📊 Mode: ${modeText}\n`;
                 statusMsg += `💰 Profit: ${data.totalProfit.toFixed(2)} MMK\n`;
-                statusMsg += `🏆 Wins: ${data.totalWins}/${data.stopLimit}\n`;  // 🆕 Win Progress
+                statusMsg += `🏆 Wins: ${data.totalWins}/${data.stopLimit}\n`;
                 statusMsg += `━━━━━━━━━━━━━━━━\n🚀 Next: ${nextIssue.slice(-5)} (${mmTime})\n`;
                 statusMsg += `🦸 ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
                 statusMsg += `━━━━━━━━━━━━━━━━\n${formatAIHistoryForVIP(data.aiLogs, 6)}`;
@@ -464,7 +584,8 @@ const mainMenu = {
             ["🚀 Start Auto", "🛑 Stop Auto"],
             ["⚙️ Settings", "📊 Status"],
             ["📜 Bet History", "📈 AI History"],
-            ["🧠 GetEmerdList ခန့်မှန်း", "🚪 Logout"]
+            ["🧠 GetEmerdList ခန့်မှန်း", "📉 Check AI Loss Streak"],
+            ["🚪 Logout"]
         ],
         resize_keyboard: true
     }
@@ -498,7 +619,6 @@ bot.on('message', async (msg) => {
     const text = msg.text;
     let data = getUserData(chatId);
 
-    // Setting Mode Input
     if (data.settingMode) {
         const mode = data.settingMode;
         
@@ -534,7 +654,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "⚙️ Settings Menu", settingsMenu);
     }
 
-    // Manual Bet Amount
     if (data.pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
         const nextIssue = await getNextIssue(chatId, data.token);
@@ -546,7 +665,7 @@ bot.on('message', async (msg) => {
 
     if (text === '/start') {
         data.running = false; data.token = null; data.autoRunning = false; data.manualBetLock = false;
-        data.totalWins = 0;  // Reset total wins
+        data.totalWins = 0;
         saveUserData(chatId, data);
         return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro 🎯\n\n⏰ 30 Sec Game - 5s Wait\n⚙️ Settings အပြည့်အစုံ\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
@@ -559,7 +678,7 @@ bot.on('message', async (msg) => {
     if (text === "🔄 Follow Pattern") {
         data.autoRunning = true; data.autoMode = 'follow'; data.currentBetStep = 0;
         data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false;
-        data.totalWins = 0;  // Reset win count
+        data.totalWins = 0;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ Follow Mode Started!\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်ရင် ရပ်မည်။`, mainMenu);
     }
@@ -593,7 +712,7 @@ bot.on('message', async (msg) => {
     if (text === "🎲 Set Bet Plan") {
         data.settingMode = "betplan";
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "📝 Bet Plan ထည့်ပါ (comma separated)\n\nဥပမာ: 10,30,60,90,150,250,400,650\n\n�က်ရှိ: " + data.betPlan.join(' → '));
+        return bot.sendMessage(chatId, "📝 Bet Plan ထည့်ပါ (comma separated)\n\nဥပမာ: 10,30,60,90,150,250,400,650\n\nလက်ရှိ: " + data.betPlan.join(' → '));
     }
 
     if (text === "🛑 Set Stop Limit") {
@@ -628,7 +747,6 @@ bot.on('message', async (msg) => {
     }
 
     if (text === "📜 Bet History") {
-        // API မခေါ်ဘဲ Local ကနေပဲ ပြ
         const d = getUserData(chatId);
         let txt = `📜 Bet History (Local)\n💰 Total: ${d.totalProfit.toFixed(2)} MMK\n🏆 Wins: ${d.totalWins}\n------------------\n`;
         
@@ -661,6 +779,16 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, txt);
     }
 
+    // 🆕 Check AI Loss Streak Command
+    if (text === "📉 Check AI Loss Streak") {
+        const d = getUserData(chatId);
+        if (!d.aiLogs || d.aiLogs.length === 0) {
+            return bot.sendMessage(chatId, "📊 AI မှတ်တမ်းမရှိသေးပါ။ အနည်းဆုံး ၁ ပွဲစောင့်ပါ။");
+        }
+        const report = formatLossStreakReport(chatId, d);
+        return bot.sendMessage(chatId, report, { parse_mode: "Markdown" });
+    }
+
     if (text === "🧠 GetEmerdList ခန့်မှန်း") {
         await bot.sendMessage(chatId, "⏳ GetEmerdList API ခေါ်နေပါသည်...");
         const pred = await getEmerdListPrediction(chatId, data.token);
@@ -685,7 +813,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "👋 Logged out. /start နဲ့ ပြန်ဝင်ပါ။");
     }
 
-    // Login
     if (/^\d{9,11}$/.test(text) && !data.token) {
         data.tempPhone = text; saveUserData(chatId, data);
         return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
@@ -740,4 +867,4 @@ http.createServer((req, res) => {
     } else { res.writeHead(200); res.end('WinGo Sniper Pro - Full Settings'); }
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-console.log("✅ Bot initialized - Full Settings & Stop Limit Fixed");
+console.log("✅ Bot initialized - Full Settings & AI Loss Streak Check Added");
