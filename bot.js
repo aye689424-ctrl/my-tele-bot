@@ -43,14 +43,14 @@ function getUserData(chatId) {
             token: null, phone: null, running: false,
             autoRunning: false, autoMode: null,
             betPlan: [10, 30, 60, 90, 150, 250, 400, 650],
-            stopLimit: 3,           // 🆕 Auto Run စကတည်းက နိုင်ပွဲအရေအတွက် (အသစ်စ)
-            lossStartLimit: 1,      // AI Correction အတွက်ပဲသုံး
+            stopLimit: 3,
+            lossStartLimit: 1,
             totalProfit: 0,
-            currentSessionWins: 0,  // 🆕 Auto Run တစ်ကြိမ်အတွက် နိုင်ပွဲအရေအတွက် (Stop Limit စစ်တာ)
-            totalWinsAllTime: 0,    // 🆕 စုစုပေါင်း နိုင်ပွဲ (မှတ်တမ်းအတွက်)
+            currentSessionWins: 0,
+            totalWinsAllTime: 0,
             currentBetStep: 0, 
             consecutiveWins: 0, 
-            consecutiveLosses: 0,   // 🆕 AI Correction အတွက် ဆက်တိုက်မှားနှုန်း
+            consecutiveLosses: 0,
             last_issue: null, 
             last_pred: null,
             manualBetLock: false, 
@@ -385,13 +385,11 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
     }
 }
 
-// ========== 🆕 Auto Run Session Reset Function ==========
 function resetAutoSession(data) {
-    data.currentSessionWins = 0;     // Stop Limit အတွက် ပြန်စ
-    data.currentBetStep = 0;          // Bet Plan အစကနေ
-    data.consecutiveLosses = 0;       // AI Correction အတွက် ပြန်စ
+    data.currentSessionWins = 0;
+    data.currentBetStep = 0;
+    data.consecutiveLosses = 0;
     data.consecutiveWins = 0;
-    // ✅ totalWinsAllTime နဲ့ totalProfit ကို မပြင်ရ (မှတ်တမ်းအတွက်)
 }
 
 // ========== 30 Sec Game - Fast Monitoring ==========
@@ -427,18 +425,17 @@ async function monitoringLoop(chatId) {
                         data.totalWinsAllTime++;
                         
                         if (pendingBet.isAuto) {
-                            data.currentSessionWins++;  // 🆕 Stop Limit အတွက် တိုး
+                            data.currentSessionWins++;
                             data.consecutiveWins++;
-                            data.consecutiveLosses = 0;   // 🆕 AI Correction အတွက် ပြန်စ
+                            data.consecutiveLosses = 0;
                             
-                            // 🆕 Stop Limit စစ်ဆေး (Auto Run Session အတွင်း နိုင်ပွဲ)
                             if (data.currentSessionWins >= data.stopLimit) {
                                 await bot.sendMessage(chatId, `🛑 Stop Limit ပြည့်ပါပြီ!\n📊 ဒီ Auto Run မှာ ${data.currentSessionWins}/${data.stopLimit} ပွဲနိုင်\n🔄 Auto Bet ရပ်ပါမည်။`);
                                 data.autoRunning = false;
                                 data.autoMode = null;
                                 resetAutoSession(data);
                             } else {
-                                data.currentBetStep = 0;  // နိုင်ရင် step 0 ပြန်
+                                data.currentBetStep = 0;
                             }
                         } else {
                             data.manualBetLock = false;
@@ -450,7 +447,6 @@ async function monitoringLoop(chatId) {
                         
                         if (pendingBet.isAuto) {
                             data.consecutiveWins = 0;
-                            data.consecutiveLosses++;  // 🆕 AI Correction အတွက် တိုး
                             
                             const nextStep = data.currentBetStep + 1;
                             if (nextStep < data.betPlan.length) {
@@ -469,9 +465,23 @@ async function monitoringLoop(chatId) {
                     data = getUserData(chatId);
                 }
 
-                // AI Log ထည့်
+                // ========== 🆕 AI Log ထည့်ပြီး consecutiveLosses ကို ပြင်မယ် ==========
                 if (data.last_pred) {
                     const aiCorrect = (data.last_pred === realSide);
+                    
+                    // AI Correction Mode အတွက် consecutiveLosses ကို စစ်မယ်
+                    if (data.autoMode === 'ai_correction') {
+                        if (!aiCorrect) {
+                            data.consecutiveLosses++;
+                            console.log(`⚠️ [${currentIssue.slice(-5)}] AI Correction: Loss streak = ${data.consecutiveLosses}/${data.lossStartLimit}`);
+                        } else {
+                            if (data.consecutiveLosses > 0) {
+                                console.log(`✅ [${currentIssue.slice(-5)}] AI Correction: Loss streak reset (was ${data.consecutiveLosses})`);
+                            }
+                            data.consecutiveLosses = 0;
+                        }
+                    }
+                    
                     data.aiLogs.unshift({ 
                         status: aiCorrect ? "✅" : "❌", 
                         issue: currentIssue.slice(-5), 
@@ -485,35 +495,33 @@ async function monitoringLoop(chatId) {
                     data = getUserData(chatId);
                 }
 
-                // New AI Signal
                 const ai = runAI(history);
                 data.last_issue = currentIssue;
                 data.last_pred = ai.side;
                 saveUserData(chatId, data);
 
-                // 🆕 Auto Bet Trigger (ပြင်ဆင်ထား)
+                // ========== Auto Bet Trigger ==========
                 if (data.autoRunning && !data.manualBetLock) {
                     let betSide = null;
                     let betAmount = data.betPlan[data.currentBetStep];
                     let betReason = "";
                     
                     if (data.autoMode === 'follow') {
-                        // Follow Mode: ပွဲထွက်တိုင်း Result အတိုင်း လိုက်ထိုး
                         betSide = realSide;
                         betReason = `🔄 Follow - ${realSide} လိုက်ထိုး`;
                     } 
                     else if (data.autoMode === 'ai_correction') {
-                        // AI Correction Mode: Loss Start Limit ပြည့်မှ စထိုး
+                        // 🆕 Loss Start Limit ပြည့်မှ စထိုး
+                        console.log(`🔍 AI Correction Check: currentLosses=${data.consecutiveLosses}, limit=${data.lossStartLimit}`);
                         if (data.consecutiveLosses >= data.lossStartLimit) {
                             betSide = data.last_pred;
                             betReason = `🤖 AI Correction - ${data.consecutiveLosses} ပွဲဆက်မှား၍ ထိုး (Limit: ${data.lossStartLimit})`;
+                            console.log(`✅ AI Correction: Betting on ${betSide}`);
                         } else {
-                            // Loss Start Limit မပြည့်သေးရင် မထိုးဘူး
-                            console.log(`⏸ AI Correction: Losses ${data.consecutiveLosses}/${data.lossStartLimit} - no bet`);
+                            console.log(`⏸ AI Correction: Need ${data.lossStartLimit - data.consecutiveLosses} more losses to bet`);
                         }
                     } 
                     else if (data.autoMode === 'emerdlist') {
-                        // GetEmerdList Mode: သူ့ဘာသာ ခန့်မှန်းထိုး (Loss Limit မပါ)
                         const pred = await getEmerdListPrediction(chatId, data.token);
                         betSide = pred.prediction;
                         betReason = `🧠 GetEmerdList - ${pred.reason}`;
@@ -544,10 +552,10 @@ async function monitoringLoop(chatId) {
                 statusMsg += `🗓 Period: ${currentIssue}\n🎲 Result: ${realSide} (${realNumber})\n`;
                 statusMsg += `🤖 AI Pred: ${data.last_pred}\n📊 Mode: ${modeText}\n`;
                 statusMsg += `💰 Total Profit: ${data.totalProfit.toFixed(2)} MMK\n`;
-                statusMsg += `🏆 Session Wins: ${data.currentSessionWins}/${data.stopLimit}\n`;  // 🆕 Session Wins
+                statusMsg += `🏆 Session Wins: ${data.currentSessionWins}/${data.stopLimit}\n`;
                 statusMsg += `📉 Max Loss Streak: ${data.maxLossStreak} ပွဲဆက်\n`;
                 if (data.autoMode === 'ai_correction') {
-                    statusMsg += `⚠️ Current Losses: ${data.consecutiveLosses}/${data.lossStartLimit}\n`;  // 🆕
+                    statusMsg += `⚠️ Current Losses: ${data.consecutiveLosses}/${data.lossStartLimit}\n`;
                 }
                 statusMsg += `━━━━━━━━━━━━━━━━\n🚀 Next: ${nextIssue.slice(-5)} (${mmTime})\n`;
                 statusMsg += `🦸 ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
@@ -667,7 +675,7 @@ bot.on('message', async (msg) => {
     if (text === "🔄 Follow Pattern") {
         data.autoRunning = true;
         data.autoMode = 'follow';
-        resetAutoSession(data);  // 🆕 Auto Run စတင်ချိန် Session ပြန်စ
+        resetAutoSession(data);
         data.manualBetLock = false;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ Follow Mode Started!\n\n🛑 Stop Limit: ${data.stopLimit} ပွဲနိုင်ရင် ရပ်မည်။\n📌 ပွဲထွက်တိုင်း Result အတိုင်း လိုက်ထိုးပါမည်။`, mainMenu);
@@ -676,7 +684,7 @@ bot.on('message', async (msg) => {
     if (text === "🤖 AI Correction") {
         data.autoRunning = true;
         data.autoMode = 'ai_correction';
-        resetAutoSession(data);  // 🆕 Auto Run စတင်ချိန် Session ပြန်စ
+        resetAutoSession(data);
         data.manualBetLock = false;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ AI Correction Started!\n\n🛑 Stop Limit: ${data.stopLimit} ပွဲနိုင်\n⚠️ Loss Start Limit: ${data.lossStartLimit} ပွဲဆက်မှားမှ စထိုး\n📌 အမှားမရှိရင် မထိုးပါ။`, mainMenu);
@@ -685,7 +693,7 @@ bot.on('message', async (msg) => {
     if (text === "🧠 GetEmerdList Auto") {
         data.autoRunning = true;
         data.autoMode = 'emerdlist';
-        resetAutoSession(data);  // 🆕 Auto Run စတင်ချိန် Session ပြန်စ
+        resetAutoSession(data);
         data.manualBetLock = false;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ GetEmerdList Auto Started!\n\n🛑 Stop Limit: ${data.stopLimit} ပွဲနိုင်\n📌 Hot/Cold Number အရ ခန့်မှန်းထိုးပါမည်။`, mainMenu);
@@ -882,4 +890,4 @@ http.createServer((req, res) => {
     } else { res.writeHead(200); res.end('WinGo Sniper Pro - Full Settings'); }
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-console.log("✅ Bot initialized - Fixed Stop Limit (Session based) & AI Correction only");
+console.log("✅ Bot initialized - AI Correction Fixed: Loss streak tracking works now");
