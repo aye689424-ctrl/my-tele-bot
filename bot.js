@@ -59,7 +59,9 @@ function getUserData(chatId) {
             aiLogs: [],
             bettingInProgress: null,
             settingMode: null,
-            emerdListData: { hotNumbers: [], coldNumbers: [], lastAnalysis: null, lastReason: "" }
+            emerdListData: { hotNumbers: [], coldNumbers: [], lastAnalysis: null, lastReason: "" },
+            tempPhone: null,
+            pendingSide: null
         };
         saveAllData(allUsers);
     }
@@ -91,9 +93,15 @@ function signMd5(payload) {
 async function callApi(endpoint, data, authToken = null) {
     const payload = { ...data, language: 7, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
     payload.signature = signMd5(payload);
-    const headers = { "Content-Type": "application/json;charset=UTF-8", "Authorization": authToken || "" };
+    const headers = { 
+        "Content-Type": "application/json;charset=UTF-8", 
+        "Authorization": authToken || "",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+        "Referer": "https://bigwinqaz.com/",
+        "Origin": "https://bigwinqaz.com"
+    };
     try {
-        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 8000 });
+        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 12000 });
         return res.data;
     } catch (e) {
         console.error('API Error:', e.message);
@@ -245,19 +253,15 @@ function formatLossStreakReport(chatId, data) {
     return report;
 }
 
-// ========== နောက်ပွဲစဉ် ရယူခြင်း ==========
+// ========== နောက်ပွဲစဉ် ရယူခြင်း (v81 style - reliable) ==========
 async function getNextIssue(chatId, token) {
     try {
-        const res = await callApi("GetGameIssue", { typeId: 30 }, token);
-        if (res?.msgCode === 0 && res.data?.issueNumber) {
-            return (BigInt(res.data.issueNumber) + 1n).toString();
+        const historyRes = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, token);
+        if (historyRes?.data?.list?.length > 0) {
+            const lastFinishedIssue = historyRes.data.list[0].issueNumber;
+            return (BigInt(lastFinishedIssue) + 1n).toString();
         }
     } catch (e) {}
-    
-    const historyRes = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, token);
-    if (historyRes?.data?.list?.length > 0) {
-        return (BigInt(historyRes.data.list[0].issueNumber) + 1n).toString();
-    }
     return null;
 }
 
@@ -384,7 +388,7 @@ function formatAIHistoryForVIP(aiLogs, limit = 50) {
     return txt;
 }
 
-// ========== အမြန်ထိုးခြင်း Function ==========
+// ========== အမြန်ထိုးခြင်း Function (v81 base unit logic) ==========
 async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto = true, betReason = "") {
     const data = getUserData(chatId);
     if (!data || !data.token) return false;
@@ -404,6 +408,7 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
     if (!isAuto) { data.manualBetLock = true; data.manualBetIssue = targetIssue.slice(-5); }
     saveUserData(chatId, data);
 
+    // Base unit logic from v81 (reliable)
     let baseUnit = amount < 10000 ? 10 : Math.pow(10, Math.floor(Math.log10(amount)) - 2);
     if (baseUnit < 10) baseUnit = 10;
     const betCount = Math.floor(amount / baseUnit);
@@ -650,33 +655,22 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "⚙️ Settings Menu", settingsMenu);
     }
 
-    // ========== MANUAL BET WITH CUSTOM ISSUE (NEW) ==========
-    if (data.pendingSide && /^\d+(?:,\d+)?$/.test(text)) {
-        let amount, customIssue = null;
-        if (text.includes(',')) {
-            const parts = text.split(',');
-            customIssue = parts[0].trim();
-            amount = parseInt(parts[1].trim());
-        } else {
-            amount = parseInt(text);
-        }
-        
+    // ========== MANUAL BET (v81 style - no custom issue, just amount) ==========
+    if (data.pendingSide && /^\d+$/.test(text)) {
+        const amount = parseInt(text);
         if (isNaN(amount) || amount <= 0) {
-            await bot.sendMessage(chatId, "❌ ပမာဏမှားနေပါ။ ဥပမာ: 100  သို့မဟုတ် 51691,100");
+            await bot.sendMessage(chatId, "❌ ပမာဏမှားနေပါ။ ဂဏန်းသာ ထည့်ပါ။");
             data.pendingSide = null;
             saveUserData(chatId, data);
             return;
         }
         
-        let targetIssue = customIssue;
+        const targetIssue = await getNextIssue(chatId, data.token);
         if (!targetIssue) {
-            targetIssue = await getNextIssue(chatId, data.token);
-            if (!targetIssue) {
-                await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။");
-                data.pendingSide = null;
-                saveUserData(chatId, data);
-                return;
-            }
+            await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။ နောက်ပွဲစောင့်ပါ။");
+            data.pendingSide = null;
+            saveUserData(chatId, data);
+            return;
         }
         
         await bot.sendMessage(chatId, `⏳ 3 စက္ကန့်စောင့်ပြီး ${data.pendingSide} (ပွဲစဉ် ${targetIssue.slice(-5)}) ထိုးပါမည်...`);
@@ -690,9 +684,10 @@ bot.on('message', async (msg) => {
 
     if (text === '/start') {
         data.running = false; data.token = null; data.autoRunning = false; data.manualBetLock = false;
-        data.totalWins = 0;
+        data.totalWins = 0; data.pendingSide = null; data.tempPhone = null;
+        data.betHistory = []; data.aiLogs = [];
         saveUserData(chatId, data);
-        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro 🎯\n\n⏰ 30 Sec Game - 5s Wait\n⚙️ Settings အပြည့်အစုံ\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        return bot.sendMessage(chatId, "🎯 WinGo Sniper Pro 🎯\n\n⏰ 30 Sec Game - 3s Manual Delay\n⚙️ Settings အပြည့်အစုံ\n\nဖုန်းနံပါတ်ပေးပါ:", mainMenu);
     }
 
     if (text === "🚀 Start Auto") {
@@ -765,7 +760,7 @@ bot.on('message', async (msg) => {
         status += `📋 Bet Plan: ${data.betPlan.join(' → ')}\n`;
         status += `🏆 Stop Limit: ${data.stopLimit} ပွဲ\n`;
         status += `⚠️ Loss Start: ${data.lossStartLimit} ပွဲ\n`;
-        status += `📈 Current Step: ${data.currentBetStep+1}/${data.betPlan.length}\n`;
+        status += `📈 Current Step: ${(data.currentBetStep||0)+1}/${data.betPlan.length}\n`;
         status += `✅ Total Wins: ${data.totalWins}/${data.stopLimit}\n`;
         status += `💰 Total Profit: ${data.totalProfit.toFixed(2)} MMK`;
         return bot.sendMessage(chatId, status);
@@ -833,6 +828,7 @@ bot.on('message', async (msg) => {
 
     if (text === "🚪 Logout") {
         data.running = false; data.token = null; data.autoRunning = false;
+        data.pendingSide = null; data.tempPhone = null;
         saveUserData(chatId, data);
         return bot.sendMessage(chatId, "👋 Logged out. /start နဲ့ ပြန်ဝင်ပါ။");
     }
@@ -868,14 +864,14 @@ bot.on('callback_query', async (query) => {
         const side = action.split('_')[1];
         data.pendingSide = side;
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, `💰 ${side === "Big" ? "BIG 🔵" : "SMALL 🔴"} အတွက် ပမာဏ ရိုက်ထည့်ပါ။\n\n(ပွဲစဉ်သတ်မှတ်လိုပါက 51691,100 ပုံစံထည့်ပါ)`);
+        await bot.sendMessage(chatId, `💰 ${side === "Big" ? "BIG 🔵" : "SMALL 🔴"} အတွက် ပမာဏ ရိုက်ထည့်ပါ:`);
         return;
     }
     
     if (action.startsWith('bet_')) {
         data.pendingSide = action.split('_')[1];
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, `💰 ${data.pendingSide} အတွက် ပမာဏ ရိုက်ထည့်ပါ။\n\n(ပွဲစဉ်သတ်မှတ်လိုပါက 51691,100 ပုံစံထည့်ပါ)`);
+        await bot.sendMessage(chatId, `💰 ${data.pendingSide} အတွက် ပမာဏ ရိုက်ထည့်ပါ:`);
     }
 });
 
@@ -888,7 +884,7 @@ http.createServer((req, res) => {
             try { bot.processUpdate(JSON.parse(body)); res.writeHead(200); res.end(JSON.stringify({ ok: true })); }
             catch (e) { res.writeHead(400); res.end(); }
         });
-    } else { res.writeHead(200); res.end('WinGo Sniper Pro - Custom Issue Manual Bet'); }
+    } else { res.writeHead(200); res.end('WinGo Sniper Pro - v81 Manual Flow Integrated'); }
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-console.log("✅ Bot initialized - Custom Issue Manual Bet Added");
+console.log("✅ Bot initialized - Manual Bet now works like v81 (reliable next issue)");
