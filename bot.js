@@ -650,21 +650,39 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "⚙️ Settings Menu", settingsMenu);
     }
 
-    // ========== MANUAL BET WITH 3 SEC DELAY ==========
-    if (data.pendingSide && /^\d+$/.test(text)) {
-        const amount = parseInt(text);
-        const nextIssue = await getNextIssue(chatId, data.token);
-        if (!nextIssue) {
-            await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။");
+    // ========== MANUAL BET WITH CUSTOM ISSUE (NEW) ==========
+    if (data.pendingSide && /^\d+(?:,\d+)?$/.test(text)) {
+        let amount, customIssue = null;
+        if (text.includes(',')) {
+            const parts = text.split(',');
+            customIssue = parts[0].trim();
+            amount = parseInt(parts[1].trim());
+        } else {
+            amount = parseInt(text);
+        }
+        
+        if (isNaN(amount) || amount <= 0) {
+            await bot.sendMessage(chatId, "❌ ပမာဏမှားနေပါ။ ဥပမာ: 100  သို့မဟုတ် 51691,100");
             data.pendingSide = null;
             saveUserData(chatId, data);
             return;
         }
-        // 🔥 3 SEC DELAY FOR MANUAL BET
-        await bot.sendMessage(chatId, `⏳ 3 စက္ကန့်စောင့်ပြီး ${data.pendingSide} ထိုးပါမည်...`);
+        
+        let targetIssue = customIssue;
+        if (!targetIssue) {
+            targetIssue = await getNextIssue(chatId, data.token);
+            if (!targetIssue) {
+                await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။");
+                data.pendingSide = null;
+                saveUserData(chatId, data);
+                return;
+            }
+        }
+        
+        await bot.sendMessage(chatId, `⏳ 3 စက္ကန့်စောင့်ပြီး ${data.pendingSide} (ပွဲစဉ် ${targetIssue.slice(-5)}) ထိုးပါမည်...`);
         await new Promise(resolve => setTimeout(resolve, 3000));
         
-        await placeBetNow(chatId, data.pendingSide, amount, nextIssue, -1, false, "ကိုယ်တိုင်ထိုး (3s delay)");
+        await placeBetNow(chatId, data.pendingSide, amount, targetIssue, -1, false, `ကိုယ်တိုင်ထိုး (${targetIssue.slice(-5)})`);
         data.pendingSide = null;
         saveUserData(chatId, data);
         return;
@@ -850,14 +868,14 @@ bot.on('callback_query', async (query) => {
         const side = action.split('_')[1];
         data.pendingSide = side;
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, `💰 ${side === "Big" ? "BIG 🔵" : "SMALL 🔴"} အတွက် ပမာဏ ရိုက်ထည့်ပါ:`);
+        await bot.sendMessage(chatId, `💰 ${side === "Big" ? "BIG 🔵" : "SMALL 🔴"} အတွက် ပမာဏ ရိုက်ထည့်ပါ။\n\n(ပွဲစဉ်သတ်မှတ်လိုပါက 51691,100 ပုံစံထည့်ပါ)`);
         return;
     }
     
     if (action.startsWith('bet_')) {
         data.pendingSide = action.split('_')[1];
         saveUserData(chatId, data);
-        await bot.sendMessage(chatId, `💰 ${data.pendingSide} အတွက် ပမာဏ ရိုက်ထည့်ပါ:`);
+        await bot.sendMessage(chatId, `💰 ${data.pendingSide} အတွက် ပမာဏ ရိုက်ထည့်ပါ။\n\n(ပွဲစဉ်သတ်မှတ်လိုပါက 51691,100 ပုံစံထည့်ပါ)`);
     }
 });
 
@@ -870,7 +888,7 @@ http.createServer((req, res) => {
             try { bot.processUpdate(JSON.parse(body)); res.writeHead(200); res.end(JSON.stringify({ ok: true })); }
             catch (e) { res.writeHead(400); res.end(); }
         });
-    } else { res.writeHead(200); res.end('WinGo Sniper Pro - Full Settings'); }
+    } else { res.writeHead(200); res.end('WinGo Sniper Pro - Custom Issue Manual Bet'); }
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-console.log("✅ Bot initialized - Full Settings & AI Loss Streak Check Added");
+console.log("✅ Bot initialized - Custom Issue Manual Bet Added");
