@@ -121,7 +121,7 @@ function runAI(history) {
     return { side: prediction || "Big", dragon: streak };
 }
 
-// ========== 🆕 AI Loss Streak Analysis Function ==========
+// ========== AI Loss Streak Analysis Function ==========
 function getAIWorstLossStreak(aiLogs) {
     if (!aiLogs || aiLogs.length === 0) {
         return { maxStreak: 0, startIssue: null, endIssue: null, details: [] };
@@ -160,7 +160,6 @@ function getAIWorstLossStreak(aiLogs) {
         }
     }
     
-    // Check if still in a loss streak at the end
     if (currentStreak > 0) {
         allStreaks.push({
             streak: currentStreak,
@@ -196,7 +195,6 @@ function getAIWorstLossStreak(aiLogs) {
     return { maxStreak, worstStreak, allStreaks };
 }
 
-// ========== 🆕 Format Loss Streak Report ==========
 function formatLossStreakReport(chatId, data) {
     const analysis = getAIWorstLossStreak(data.aiLogs);
     
@@ -222,7 +220,6 @@ function formatLossStreakReport(chatId, data) {
         report += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         report += `💡 **မှတ်ချက်:** ${analysis.maxStreak} ပွဲဆက်မှားပြီးနောက် `;
         
-        // Check what happened after worst streak
         const worstEndIndex = data.aiLogs.findIndex(log => log.issue === analysis.worstStreak.endIssue);
         if (worstEndIndex !== -1 && worstEndIndex + 1 < data.aiLogs.length) {
             const nextResult = data.aiLogs[worstEndIndex + 1];
@@ -236,7 +233,6 @@ function formatLossStreakReport(chatId, data) {
         }
     }
     
-    // Add summary of all streaks
     if (analysis.allStreaks.length > 1) {
         report += `\n\n📊 **အခြား အမှားအဆက်များ:**\n`;
         analysis.allStreaks.forEach((streak, idx) => {
@@ -654,12 +650,23 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "⚙️ Settings Menu", settingsMenu);
     }
 
+    // ========== MANUAL BET WITH 3 SEC DELAY ==========
     if (data.pendingSide && /^\d+$/.test(text)) {
         const amount = parseInt(text);
         const nextIssue = await getNextIssue(chatId, data.token);
-        if (!nextIssue) { await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။"); data.pendingSide = null; saveUserData(chatId, data); return; }
-        await placeBetNow(chatId, data.pendingSide, amount, nextIssue, -1, false, "ကိုယ်တိုင်ထိုး");
-        data.pendingSide = null; saveUserData(chatId, data);
+        if (!nextIssue) {
+            await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။");
+            data.pendingSide = null;
+            saveUserData(chatId, data);
+            return;
+        }
+        // 🔥 3 SEC DELAY FOR MANUAL BET
+        await bot.sendMessage(chatId, `⏳ 3 စက္ကန့်စောင့်ပြီး ${data.pendingSide} ထိုးပါမည်...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        await placeBetNow(chatId, data.pendingSide, amount, nextIssue, -1, false, "ကိုယ်တိုင်ထိုး (3s delay)");
+        data.pendingSide = null;
+        saveUserData(chatId, data);
         return;
     }
 
@@ -779,7 +786,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, txt);
     }
 
-    // 🆕 Check AI Loss Streak Command
     if (text === "📉 Check AI Loss Streak") {
         const d = getUserData(chatId);
         if (!d.aiLogs || d.aiLogs.length === 0) {
