@@ -17,8 +17,6 @@ const EXTRA_BOT_CHAT_ID = '6545674873';
 const extraBot = new TelegramBot(EXTRA_BOT_TOKEN, { polling: false });
 
 // ========== PUBLIC CHANNEL (User အားလုံး မြင်ရန်) ==========
-// ဒီနေရာမှာ Public Channel ID ထည့်ပါ (ဥပမာ -1001234567890)
-// မရှိသေးရင် extra bot ထဲကိုပဲ ပို့မှာပါ
 const PUBLIC_CHANNEL_ID = process.env.PUBLIC_CHANNEL_ID || EXTRA_BOT_CHAT_ID;
 
 const bot = new TelegramBot(token);
@@ -91,7 +89,7 @@ function getUserData(chatId) {
             tempPhone: null,
             pendingSide: null,
             username: null,
-            nickname: null // User နာမည်ပြောင်
+            nickname: null
         };
         saveAllData(allUsers);
     }
@@ -193,11 +191,10 @@ async function sendToExtraBot(chatId, userData, betDetail) {
             } catch(e) {}
         }
         
-        // ========== USER ဆီကိုလည်း ပြန်ပို့ပေးမယ် ==========
+        // USER ဆီကိုလည်း ပြန်ပို့ပေး
         try {
             await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
         } catch(e) {
-            // Markdown error ဖြစ်ရင် plain text နဲ့ ပို့
             await bot.sendMessage(chatId, msg.replace(/\*/g, ''));
         }
         
@@ -376,6 +373,7 @@ async function getEmerdListPrediction(chatId, token) {
     return { prediction: "Big", reason: "ပုံသေ BIG ထိုးမည်" };
 }
 
+// ========== AI HISTORY 20 ပွဲ ပြသရန် ==========
 function formatAIHistoryForVIP(aiLogs, limit = 20) {
     if (!aiLogs || aiLogs.length === 0) return "📊 မှတ်တမ်းမရှိသေးပါ";
     const recentLogs = aiLogs.slice(0, limit);
@@ -507,6 +505,7 @@ async function monitoringLoop(chatId) {
             const nextIssue = (BigInt(currentIssue) + 1n).toString();
             
             if (currentIssue !== data.last_issue) {
+                // Pending bet စစ်ဆေးခြင်း
                 let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === currentIssue.slice(-5));
                 let betResult = null;
                 if (pendingBet) {
@@ -546,7 +545,7 @@ async function monitoringLoop(chatId) {
                     betResult = { ...pendingBet, resultNumber: realNumber, resultSide: realSide };
                     saveUserData(chatId, data);
                     
-                    // Extra Bot + User ဆီ ပို့မယ်
+                    // Extra Bot + User ဆီ ပို့
                     await sendToExtraBot(chatId, data, betResult);
                     
                     // Update active user
@@ -597,7 +596,7 @@ async function monitoringLoop(chatId) {
                     }
                 }
                 
-                // ========== VIP SIGNAL (User ဆီ + Public) ==========
+                // ========== VIP SIGNAL (User ဆီ + Public) - AI HISTORY 20 ပါ ==========
                 const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
                 const nickname = data.nickname || `User ${chatId.slice(-3)}`;
                 let modeText = "⚪️ Manual";
@@ -617,6 +616,7 @@ async function monitoringLoop(chatId) {
                 const winsDisplay = data.autoRunning ? data.sessionWins : 0;
                 statusMsg += `🏆 Wins: ${winsDisplay}/${data.stopLimit}\n`;
                 
+                // AI Loss Streak အမြဲပြရန်
                 const lossStreakShort = formatLossStreakShort(data.aiLogs);
                 statusMsg += `📉 ${lossStreakShort}\n`;
                 
@@ -625,8 +625,14 @@ async function monitoringLoop(chatId) {
                 statusMsg += `🦸 ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
                 
                 if (data.consecutiveLosses > 0) {
-                    statusMsg += `⚠️ လက်ရှိအမှားဆက်: ${data.consecutiveLosses} ပွဲ\n`;
+                    statusMsg += `⚠️ လက်ရှိအမှားဆက်: ${data.consecutiveLosses} ပွဲ`;
+                    if (data.consecutiveLosses >= 7) statusMsg += ` (7 ပွဲဆက်မှား - သတိထားပါ)`;
+                    statusMsg += `\n`;
                 }
+                
+                statusMsg += `━━━━━━━━━━━━━━━━\n`;
+                // ✅ AI History 20 ပွဲ ထည့်သွင်းပြသခြင်း
+                statusMsg += `${formatAIHistoryForVIP(data.aiLogs, 20)}`;
                 
                 // Add to public signals
                 addToPublicSignals({
@@ -648,7 +654,7 @@ async function monitoringLoop(chatId) {
                     } 
                 });
                 
-                // ========== PUBLIC CHANNEL ဆီလည်း ပို့ ==========
+                // Public Channel ဆီလည်း ပို့
                 try {
                     let publicMsg = `🌍 *PUBLIC SIGNAL* 🌍\n`;
                     publicMsg += `━━━━━━━━━━━━━━━━\n`;
@@ -1081,4 +1087,4 @@ http.createServer((req, res) => {
     }
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-console.log("✅ Bot ready - PUBLIC DASHBOARD ACTIVE - All users can see all bets/signals!");
+console.log("✅ Bot ready - AI History 20 in VIP Signal + Public Dashboard + All Features");
