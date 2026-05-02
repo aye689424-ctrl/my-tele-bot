@@ -118,7 +118,7 @@ function saveUserData(chatId, data) {
     saveAllData(allUsers);
 }
 
-// ========== BALANCE CHECKER ==========
+// ========== BALANCE CHECKER (GetUserInfo - amount field ဦးစားပေး) ==========
 async function checkBalance(chatId) {
     const data = getUserData(chatId);
     if (!data || !data.token) return null;
@@ -126,16 +126,33 @@ async function checkBalance(chatId) {
     try {
         // GetUserInfo API ခေါ်ပြီး လက်ကျန်စစ်မယ်
         const res = await callApi("GetUserInfo", {}, data.token);
+        
         if (res?.msgCode === 0 && res.data) {
-            const balance = res.data.balance || res.data.coin || 0;
-            data.currentBalance = balance;
+            // amount field ကို ဦးစားပေးရှာမယ်၊ မတွေ့ရင် တခြား field တွေ ရှာမယ်
+            const balance = res.data.amount 
+                         || res.data.balance 
+                         || res.data.coin 
+                         || res.data.money 
+                         || res.data.wallet 
+                         || res.data.userBalance
+                         || res.data.accountBalance
+                         || res.data.availableBalance
+                         || res.data.totalBalance
+                         || res.data.credit
+                         || res.data.points
+                         || res.data.cash
+                         || 0;
+            
+            console.log('✅ Balance found:', balance, 'MMK');
+            
+            data.currentBalance = parseFloat(balance) || 0;
             saveUserData(chatId, data);
-            return balance;
+            return data.currentBalance;
         }
     } catch(e) {
         console.error('Balance check error:', e.message);
     }
-    return null;
+    return data.currentBalance || 0;
 }
 
 // ========== PUBLIC DATA HELPERS ==========
@@ -492,7 +509,7 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
     if (res?.msgCode === 0 || res?.msg === "Bet success") {
         // ========== လက်ကျန်ငွေ အပ်ဒိတ်လုပ်မယ် ==========
         if (res.data) {
-            data.currentBalance = res.data.balance || res.data.coin || data.currentBalance;
+            data.currentBalance = res.data.amount || res.data.balance || res.data.coin || data.currentBalance;
         }
         
         const typeText = isAuto ? `[AUTO ${data.autoMode || ''}]` : "[MANUAL]";
@@ -748,10 +765,12 @@ bot.on('message', async (msg) => {
         if (!data.token) return bot.sendMessage(chatId, "❌ အကောင့်ဝင်ပါ။");
         await bot.sendMessage(chatId, "⏳ လက်ကျန်ငွေ စစ်ဆေးနေပါသည်...");
         const balance = await checkBalance(chatId);
-        if (balance !== null) {
+        if (balance !== null && balance > 0) {
             await bot.sendMessage(chatId, `💰 *လက်ကျန်ငွေ*\n━━━━━━━━━━━━━━━━\n🏦 ${balance.toFixed(2)} MMK`, { parse_mode: "Markdown" });
+        } else if (balance === 0) {
+            await bot.sendMessage(chatId, `💰 *လက်ကျန်ငွေ*\n━━━━━━━━━━━━━━━━\n🏦 0.00 MMK\n\n⚠️ လက်ကျန်ငွေ 0 ဖြစ်နေပါသည်။ ငွေဖြည့်ရန် လိုအပ်ပါသည်။`, { parse_mode: "Markdown" });
         } else {
-            await bot.sendMessage(chatId, "❌ လက်ကျန်ငွေ စစ်ဆေး၍မရပါ။");
+            await bot.sendMessage(chatId, "❌ လက်ကျန်ငွေ စစ်ဆေး၍မရပါ။ အကောင့်ပြန်ဝင်ကြည့်ပါ။");
         }
         return;
     }
@@ -815,7 +834,7 @@ bot.on('message', async (msg) => {
     if (text === "⚙️ Settings") return bot.sendMessage(chatId,"⚙️ Settings Menu", settingsMenu);
     if (text === "🎲 Set Bet Plan") { data.settingMode="betplan"; saveUserData(chatId,data); return bot.sendMessage(chatId,`📝 Bet Plan ထည့်ပါ\n\nလက်ရှိ: ${data.betPlan.join(' → ')}\n\nဥပမာ: 10,30,60,90,150,250,400,650`); }
     if (text === "🛑 Set Stop Limit") { data.settingMode="stoplimit"; saveUserData(chatId,data); return bot.sendMessage(chatId,`🏆 Stop Limit ထည့်ပါ\n\nလက်ရှိ: ${data.stopLimit} ပွဲ`); }
-    if (text === "⚠️ Set Loss Start") { data.settingMode="lossstart"; saveUserData(chatId,data); return bot.sendMessage(chatId,`⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\nလက်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`); }
+    if (text === "⚠️ Set Loss Start") { data.settingMode="lossstart"; saveUserData(chatId,data); return bot.sendMessage(chatId,`⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\n�က်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`); }
     if (text === "🔙 Main Menu") { delete data.settingMode; saveUserData(chatId,data); return bot.sendMessage(chatId,"Main Menu", mainMenu); }
     
     if (text === "📊 Status") {
@@ -924,13 +943,13 @@ http.createServer((req, res) => {
         });
     } else { 
         res.writeHead(200); 
-        res.end('WinGo Pro Bot - Balance + Details'); 
+        res.end('WinGo Pro Bot - amount field balance checker'); 
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`📡 Channel ID: ${PUBLIC_CHANNEL_ID}`);
-    console.log(`💰 Balance Checker: ACTIVE`);
+    console.log(`💰 Balance Checker: amount field ဦးစားပေး`);
     console.log(`📊 အသေးစိတ်အစီရင်ခံစာ: ACTIVE`);
 });
 
-console.log("✅ Bot ready - Balance Check + အသေးစိတ်အစီရင်ခံစာ + All Features");
+console.log("✅ Bot ready - amount field Balance Check + အသေးစိတ်အစီရင်ခံစာ + All Features");
