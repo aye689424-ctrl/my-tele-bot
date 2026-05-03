@@ -116,7 +116,8 @@ function getUserData(chatId) {
                     reverse: { wins: 0, losses: 0 },
                     ai_correction: { wins: 0, losses: 0 },
                     emerdlist: { wins: 0, losses: 0 },
-                    hybrid: { wins: 0, losses: 0 }
+                    hybrid: { wins: 0, losses: 0 },
+                    ai_brain: { wins: 0, losses: 0 }
                 },
                 currentBestMode: null,
                 lastModeSwitch: null,
@@ -135,7 +136,8 @@ function getUserData(chatId) {
                 reverse: { wins: 0, losses: 0 },
                 ai_correction: { wins: 0, losses: 0 },
                 emerdlist: { wins: 0, losses: 0 },
-                hybrid: { wins: 0, losses: 0 }
+                hybrid: { wins: 0, losses: 0 },
+                ai_brain: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -520,19 +522,18 @@ function formatActiveSignals() {
     return txt;
 }
 
-// ========== AI BRAIN - Master Decision Engine ==========
+// ========== AI BRAIN - Master Decision Engine v2.0 ==========
 function aiBrainDecide(data, history, realSide, realNumber) {
     const aiLogs = data.aiLogs || [];
     
-    // AI 20 ပွဲ ကြည့်မယ်
+    // AI 20 ပွဲ + 10 ပွဲ + 5 ပွဲ ကြည့်မယ်
     const recent20 = aiLogs.slice(0, 20);
     const recent10 = aiLogs.slice(0, 10);
     const recent5 = aiLogs.slice(0, 5);
     
     // AI မှန်နှုန်းတွေ
-    const totalRecent = recent20.length || 1;
     const correctRecent20 = recent20.filter(l => l.status === "✅").length;
-    const accuracy20 = correctRecent20 / totalRecent;
+    const accuracy20 = recent20.length > 0 ? correctRecent20 / recent20.length : 0;
     
     const correctRecent10 = recent10.filter(l => l.status === "✅").length;
     const accuracy10 = recent10.length > 0 ? correctRecent10 / recent10.length : accuracy20;
@@ -540,10 +541,10 @@ function aiBrainDecide(data, history, realSide, realNumber) {
     const correctRecent5 = recent5.filter(l => l.status === "✅").length;
     const accuracy5 = recent5.length > 0 ? correctRecent5 / recent5.length : accuracy10;
     
-    // AI မှားဆက်
+    // AI မှားဆက် (အရေးကြီးဆုံး)
     let currentLossStreak = 0;
-    for (let i = 0; i < recent20.length; i++) {
-        if (recent20[i].status === "❌") currentLossStreak++;
+    for (let i = 0; i < aiLogs.length; i++) {
+        if (aiLogs[i].status === "❌") currentLossStreak++;
         else break;
     }
     
@@ -552,9 +553,9 @@ function aiBrainDecide(data, history, realSide, realNumber) {
     let bigCount = last5Results.filter(r => r === 'Big').length;
     let smallCount = last5Results.filter(r => r === 'Small').length;
     
-    // Website မှာ ဘက်တစ်ဘက် ဆက်တိုက်ကျနေလား
+    // Website ဘက်တစ်ဘက် ဆက်တိုက်ကျနေလား
     let websiteStreak = 1;
-    let websiteStreakSide = last5Results[0];
+    let websiteStreakSide = last5Results[0] || "Big";
     for (let i = 1; i < last5Results.length; i++) {
         if (last5Results[i] === websiteStreakSide) websiteStreak++;
         else break;
@@ -563,58 +564,75 @@ function aiBrainDecide(data, history, realSide, realNumber) {
     // AI ခန့်မှန်း
     const aiPrediction = data.last_pred || "Big";
     
-    // ========== AI BRAIN DECISION LOGIC ==========
+    // ========== AI BRAIN DECISION LOGIC v2.0 ==========
     let finalSide = null;
     let decisionReason = "";
     let selectedMode = "";
     
-    // Rule 1: AI 20 ပွဲမှန်နှုန်း 70% အထက် + လက်ရှိမှန် → AI ယုံ
-    if (accuracy20 >= 0.70 && currentLossStreak === 0) {
-        finalSide = aiPrediction;
-        selectedMode = "AI Trust";
-        decisionReason = `🧠 AI 20ပွဲမှန်နှုန်း ${(accuracy20*100).toFixed(0)}% ဖြင့် အလွန်ကောင်း → AI အတိုင်းထိုး`;
+    // 🔴 RULE 1: AI 2+ ပွဲဆက်မှား + AI 5ပွဲမှန်နှုန်း 40% အောက် → AI မကောင်းတော့ → Website Follow
+    if (currentLossStreak >= 2 && accuracy5 < 0.4) {
+        finalSide = realSide;
+        selectedMode = "AI Down → Follow";
+        decisionReason = `🧠 AI ${currentLossStreak}ပွဲဆက်မှား + 5ပွဲမှန်နှုန်း ${(accuracy5*100).toFixed(0)}% ကျဆင်း → Website Follow`;
     }
     
-    // Rule 2: AI 5 ပွဲဆက်မှား + Website 3+ ဆက်တူ → Website လိုက်
-    else if (currentLossStreak >= 5 && websiteStreak >= 3) {
+    // 🟠 RULE 2: AI 4+ ပွဲဆက်မှား + Website 2+ ဆက် → Website Follow (AI မကောင်း)
+    else if (currentLossStreak >= 4 && websiteStreak >= 2) {
         finalSide = websiteStreakSide;
-        selectedMode = "Website Follow";
-        decisionReason = `🧠 AI ${currentLossStreak}ပွဲဆက်မှား + Website ${websiteStreakSide} ${websiteStreak}ဆက် → Website Follow`;
+        selectedMode = "AI Fail → Website";
+        decisionReason = `🧠 AI ${currentLossStreak}ပွဲဆက်မှား + Website ${websiteStreakSide} ${websiteStreak}ဆက် → Website အတိုင်းလိုက်`;
     }
     
-    // Rule 3: AI 3-4 ပွဲမှား + Website ပြောင်းပြန် → Reverse ထိုး
-    else if (currentLossStreak >= 3 && currentLossStreak <= 4 && websiteStreak >= 2) {
+    // 🟡 RULE 3: Website 4+ ဆက် → Reverse (ပြောင်းပြန်ထိုး)
+    else if (websiteStreak >= 4) {
         finalSide = websiteStreakSide === "Big" ? "Small" : "Big";
-        selectedMode = "Website Reverse";
-        decisionReason = `🧠 AI ${currentLossStreak}ပွဲမှား + Website ${websiteStreakSide}ဆက် → Reverse ပြောင်းပြန်ထိုး`;
+        selectedMode = "Web Strong → Reverse";
+        decisionReason = `🧠 Website ${websiteStreakSide} ${websiteStreak}ဆက် → ပြောင်းပြန်ထိုးချိန်`;
     }
     
-    // Rule 4: AI မှားဆက် 7+ → AI ပြန်ကောင်းချိန်ရောက်ပြီ → AI ပြန်လိုက်
-    else if (currentLossStreak >= 7) {
+    // 🟢 RULE 4: AI 5+ ပွဲဆက်မှား → AI Recovery (AI ပြန်ကောင်းချိန်)
+    else if (currentLossStreak >= 5) {
         finalSide = aiPrediction;
         selectedMode = "AI Recovery";
         decisionReason = `🧠 AI ${currentLossStreak}ပွဲဆက်မှား → AI ပြန်မှန်ချိန်နီးပြီ`;
     }
     
-    // Rule 5: Website ဘက်တစ်ဘက် 4+ ဆက် → ပြောင်းပြန်ထိုး
-    else if (websiteStreak >= 4) {
-        finalSide = websiteStreakSide === "Big" ? "Small" : "Big";
-        selectedMode = "Website Reverse";
-        decisionReason = `🧠 Website ${websiteStreakSide} ${websiteStreak}ဆက် → ပြောင်းပြန်ထိုးချိန်`;
-    }
-    
-    // Rule 6: AI မှန်နှုန်း 50% အောက် + Website ကောင်း → Website Follow
-    else if (accuracy10 < 0.5 && websiteStreak >= 2) {
+    // 🔵 RULE 5: AI 3-4 ပွဲမှား + Website 3+ ဆက် → Website Follow
+    else if (currentLossStreak >= 3 && currentLossStreak <= 4 && websiteStreak >= 3) {
         finalSide = websiteStreakSide;
-        selectedMode = "Website Follow";
-        decisionReason = `🧠 AI မှန်နှုန်းကျ (${(accuracy10*100).toFixed(0)}%) + Website ကောင်း → Website Follow`;
+        selectedMode = "Web Strong → Follow";
+        decisionReason = `🧠 AI ${currentLossStreak}ပွဲမှား + Website ${websiteStreakSide} ${websiteStreak}ဆက် → Website Follow`;
     }
     
-    // Rule 7: Default → AI အတိုင်းထိုး
-    else {
+    // 🟣 RULE 6: AI 1+ ပွဲမှား + AI 10ပွဲမှန်နှုန်း 50% အောက် → AI မကောင်း → Website Follow
+    else if (currentLossStreak >= 1 && accuracy10 < 0.5 && websiteStreak >= 2) {
+        finalSide = websiteStreakSide;
+        selectedMode = "AI Weak → Follow";
+        decisionReason = `🧠 AI 10ပွဲမှန်နှုန်း ${(accuracy10*100).toFixed(0)}% + Web ${websiteStreakSide}ဆက် → Website Follow`;
+    }
+    
+    // ⚪ RULE 7: AI 20ပွဲမှန်နှုန်း 70%+ + လက်ရှိမှား 1 ပွဲအောက် → AI ယုံ
+    else if (accuracy20 >= 0.70 && currentLossStreak <= 1) {
         finalSide = aiPrediction;
-        selectedMode = "AI Default";
-        decisionReason = `🧠 AI မှန်နှုန်း ${(accuracy20*100).toFixed(0)}% | ${currentLossStreak}ပွဲမှား → AI အတိုင်း`;
+        selectedMode = "AI Trust";
+        decisionReason = `🧠 AI 20ပွဲမှန်နှုန်း ${(accuracy20*100).toFixed(0)}% ဖြင့် ကောင်းမွန် → AI အတိုင်းထိုး`;
+    }
+    
+    // 🟤 RULE 8: Default → AI မှန်နှုန်းအလိုက် ချိန်ဆ
+    else {
+        if (accuracy10 >= 0.6) {
+            finalSide = aiPrediction;
+            selectedMode = "AI Default";
+            decisionReason = `🧠 AI မှန်နှုန်း ${(accuracy10*100).toFixed(0)}% | ${currentLossStreak}ပွဲမှား → AI အတိုင်း`;
+        } else if (websiteStreak >= 2) {
+            finalSide = websiteStreakSide;
+            selectedMode = "Web Default";
+            decisionReason = `🧠 AI မှန်နှုန်းကျ + Website ${websiteStreakSide}ဆက် → Website Follow`;
+        } else {
+            finalSide = aiPrediction;
+            selectedMode = "AI Default";
+            decisionReason = `🧠 AI မှန်နှုန်း ${(accuracy20*100).toFixed(0)}% | ${currentLossStreak}ပွဲမှား → AI အတိုင်း`;
+        }
     }
     
     return {
@@ -624,6 +642,7 @@ function aiBrainDecide(data, history, realSide, realNumber) {
         stats: {
             aiAccuracy20: (accuracy20 * 100).toFixed(0) + '%',
             aiAccuracy10: (accuracy10 * 100).toFixed(0) + '%',
+            aiAccuracy5: (accuracy5 * 100).toFixed(0) + '%',
             aiLossStreak: currentLossStreak,
             websiteStreak: websiteStreakSide + ' ' + websiteStreak + 'ဆက်',
             websiteBigSmall: `BIG:${bigCount} SMALL:${smallCount}`
@@ -762,7 +781,6 @@ async function monitoringLoop(chatId) {
                                 data.autoRunning = false; data.autoMode = null; data.currentBetStep = 0; data.consecutiveWins = 0; data.sessionWins = 0;
                             } else { data.currentBetStep = 0; }
                         } else { data.manualBetLock = false; data.manualBetIssue = null; }
-                        // Update Brain Stats
                         if (pendingBet.mode) {
                             updateBrainStats(data, pendingBet.mode, true);
                         }
@@ -781,7 +799,6 @@ async function monitoringLoop(chatId) {
                                 data.autoRunning = false; data.autoMode = null; data.currentBetStep = 0; data.sessionWins = 0; 
                             }
                         } else { data.manualBetLock = false; data.manualBetIssue = null; }
-                        // Update Brain Stats
                         if (pendingBet.mode) {
                             updateBrainStats(data, pendingBet.mode, false);
                         }
@@ -862,13 +879,12 @@ async function monitoringLoop(chatId) {
                         }
                     }
                     
-                    // ========== MODE: AI BRAIN (Master Decision) ==========
+                    // ========== MODE: AI BRAIN (Master Decision v2.0) ==========
                     else if (data.autoMode === 'ai_brain') {
                         const brainDecision = aiBrainDecide(data, history, realSide, realNumber);
                         betSide = brainDecision.side;
                         betReason = brainDecision.reason;
-                        // Brain stats ကို betReason မှာ ထည့်မယ်
-                        betReason += `\n📊 AIမှန်:${brainDecision.stats.aiAccuracy20} | AIမှားဆက်:${brainDecision.stats.aiLossStreak} | Web:${brainDecision.stats.websiteStreak}`;
+                        betReason += `\n📊 AIမှန်:${brainDecision.stats.aiAccuracy20} | 5ပွဲ:${brainDecision.stats.aiAccuracy5} | AIမှားဆက်:${brainDecision.stats.aiLossStreak} | Web:${brainDecision.stats.websiteStreak}`;
                     }
                     
                     if (betSide) {
@@ -891,7 +907,7 @@ async function monitoringLoop(chatId) {
                     else if (data.autoMode === 'ai_correction') modeText = "🟡 AI Correction";
                     else if (data.autoMode === 'emerdlist') modeText = "🧠 GetEmerdList";
                     else if (data.autoMode === 'hybrid') modeText = "🧬 Smart Hybrid";
-                    else if (data.autoMode === 'ai_brain') modeText = "🧠 AI Brain";
+                    else if (data.autoMode === 'ai_brain') modeText = "🧠 AI Brain v2";
                 }
                 
                 let statusMsg = `💥 *${nickname} - VIP SIGNAL* 💥\n`;
@@ -907,7 +923,6 @@ async function monitoringLoop(chatId) {
                 const lossStreakShort = formatLossStreakShort(data.aiLogs);
                 statusMsg += `📉 ${lossStreakShort}\n`;
                 
-                // AI Brain အပိုအချက်အလက်
                 if (data.autoMode === 'ai_brain' && data.brainStats) {
                     statusMsg += `🧠 Best Mode: ${data.brainStats.currentBestMode || 'N/A'}\n`;
                 }
@@ -971,7 +986,7 @@ const autoModeMenu = {
             ["🤖 AI Correction"], 
             ["🧠 GetEmerdList Auto"],
             ["🧬 Smart Hybrid"],
-            ["🧠 AI Brain (Master)"],
+            ["🧠 AI Brain v2 (Master)"],
             ["🔙 Main Menu"]
         ], 
         resize_keyboard: true 
@@ -1019,11 +1034,11 @@ bot.on('message', async (msg) => {
         let welcomeMsg = `🎯 *WinGo Sniper Pro v3.0* 🎯\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
         welcomeMsg += `⏰ 30 Sec Game - Advanced AI\n`;
-        welcomeMsg += `📡 Channel Signal + AI Brain\n`;
+        welcomeMsg += `📡 Channel Signal + AI Brain v2\n`;
         welcomeMsg += `🧠 *Mode အသစ်များ:*\n`;
         welcomeMsg += `  🔃 Reverse (ကြီးဆိုသေး/သေးဆိုကြီး)\n`;
         welcomeMsg += `  🧬 Smart Hybrid (AI 20ပွဲကြည့်)\n`;
-        welcomeMsg += `  🧠 AI Brain (Master Decision)\n`;
+        welcomeMsg += `  🧠 AI Brain v2 (8 Rules Master)\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n\n`;
         welcomeMsg += `🌍 *GLOBAL STATS* 🌍\n`;
         welcomeMsg += `👥 Active Users: ${Object.keys(publicData.activeUsers).length}\n`;
@@ -1134,12 +1149,12 @@ bot.on('message', async (msg) => {
     }
     
     if (text === "🚀 Start Auto") { if(!data.token) return bot.sendMessage(chatId,"❌ အကောင့်ဝင်ပါ။"); return bot.sendMessage(chatId,"🤖 Auto Mode ရွေးပါ:", autoModeMenu); }
-    if (text === "🔄 Follow Pattern") { data.autoRunning=true; data.autoMode='follow'; data.currentBetStep=0; data.consecutiveWins=0; data.consecutiveLosses=0; data.manualBetLock=false; data.sessionWins=0; saveUserData(chatId,data); await bot.sendMessage(chatId,`✅ Follow Mode Started!\n\nနောက်ဆုံးပွဲအတိုင်း လိုက်ထိုးမည်။\nStop Limit: ${data.stopLimit} ပွဲနိုင်ရင် ရပ်မည်।\nBet Plan: ${data.betPlan.join(' → ')}`, mainMenu); }
+    if (text === "🔄 Follow Pattern") { data.autoRunning=true; data.autoMode='follow'; data.currentBetStep=0; data.consecutiveWins=0; data.consecutiveLosses=0; data.manualBetLock=false; data.sessionWins=0; saveUserData(chatId,data); await bot.sendMessage(chatId,`✅ Follow Mode Started!\n\nနောက်ဆုံးပွဲအတိုင်း လိုက်ထိုးမည်။\nStop Limit: ${data.stopLimit} ပွဲနိုင်ရင် ရပ်မည်။\nBet Plan: ${data.betPlan.join(' → ')}`, mainMenu); }
     if (text === "🔃 Reverse Pattern") { data.autoRunning=true; data.autoMode='reverse'; data.currentBetStep=0; data.consecutiveWins=0; data.consecutiveLosses=0; data.manualBetLock=false; data.sessionWins=0; saveUserData(chatId,data); await bot.sendMessage(chatId,`✅ Reverse Mode Started!\n\nကြီးထွက်ရင် သေးထိုး / သေးထွက်ရင် ကြီးထိုး\nStop Limit: ${data.stopLimit} ပွဲနိုင်ရင် ရပ်မည်။\nBet Plan: ${data.betPlan.join(' → ')}`, mainMenu); }
     if (text === "🤖 AI Correction") { data.autoRunning=true; data.autoMode='ai_correction'; data.currentBetStep=0; data.consecutiveWins=0; data.consecutiveLosses=0; data.manualBetLock=false; data.sessionWins=0; saveUserData(chatId,data); await bot.sendMessage(chatId,`✅ AI Correction Started!\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nLoss Start: ${data.lossStartLimit} ပွဲဆက်မှား\nBet Plan: ${data.betPlan.join(' → ')}`, mainMenu); }
     if (text === "🧠 GetEmerdList Auto") { data.autoRunning=true; data.autoMode='emerdlist'; data.currentBetStep=0; data.consecutiveWins=0; data.consecutiveLosses=0; data.manualBetLock=false; data.sessionWins=0; saveUserData(chatId,data); await bot.sendMessage(chatId,`✅ GetEmerdList Auto Started!\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nBet Plan: ${data.betPlan.join(' → ')}`, mainMenu); }
     if (text === "🧬 Smart Hybrid") { data.autoRunning=true; data.autoMode='hybrid'; data.currentBetStep=0; data.consecutiveWins=0; data.consecutiveLosses=0; data.manualBetLock=false; data.sessionWins=0; saveUserData(chatId,data); await bot.sendMessage(chatId,`✅ Smart Hybrid Mode Started!\n\n🧬 Logic (AI 20 ပွဲကြည့်):\n• AI 70%+ မှန် → AI လိုက်\n• AI 2-4 ပွဲမှား → Website Follow\n• AI 5+ ပွဲမှား → AI ပြန်မှန်ချိန်\n\nStop Limit: ${data.stopLimit}\nBet Plan: ${data.betPlan.join(' → ')}`, mainMenu); }
-    if (text === "🧠 AI Brain (Master)") { 
+    if (text === "🧠 AI Brain v2 (Master)") { 
         data.autoRunning=true; 
         data.autoMode='ai_brain'; 
         data.currentBetStep=0; 
@@ -1148,7 +1163,7 @@ bot.on('message', async (msg) => {
         data.manualBetLock=false; 
         data.sessionWins=0; 
         saveUserData(chatId,data); 
-        await bot.sendMessage(chatId,`✅ *AI Brain (Master Mode) Started!*\n\n🧠 *ဦးနှောက်ဖြင့် ဆုံးဖြတ်မည့် Mode*\n\n📊 AI 20ပွဲမှန်နှုန်း + Website Pattern + Loss Streak တွေကို ချိန်ဆပြီး အကောင်းဆုံး ဆုံးဖြတ်မည်။\n\n🔄 Modes တွေကို အလိုအလျောက်ပြောင်းမည်:\n• AI ကောင်းရင် → AI လိုက်\n• Website အားကောင်းရင် → Website Follow\n• Pattern ကွဲရင် → Reverse\n• AI ပြန်ကောင်းချိန် → AI Recovery\n\nStop Limit: ${data.stopLimit}\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu }); 
+        await bot.sendMessage(chatId,`✅ *AI Brain v2 (Master Mode) Started!*\n\n🧠 *8 Rules Decision Engine*\n\n📊 AI 5/10/20 ပွဲမှန်နှုန်း + Website Pattern + Loss Streak အားလုံးကို ချိန်ဆပြီး အကောင်းဆုံးဆုံးဖြတ်မည်။\n\n🔴 AI မှားဆက်ကို ဦးစားပေးမည်\n🟠 Website အားကောင်းရင် Follow\n🟡 Website 4+ ဆက်ရင် Reverse\n🟢 AI 5+ မှားရင် Recovery\n\nStop Limit: ${data.stopLimit}\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu }); 
     }
     if (text === "🛑 Stop Auto") { data.autoRunning=false; data.autoMode=null; data.sessionWins=0; data.currentBetStep=0; saveUserData(chatId,data); return bot.sendMessage(chatId,"🛑 Auto Bet ရပ်ထားပါပြီ!", mainMenu); }
     
@@ -1255,12 +1270,16 @@ bot.onText(/\/help/, async (msg) => {
     helpText += `• 🤖 AI Correction - AI အမှားဆက်မှ ထိုး\n`;
     helpText += `• 🧠 GetEmerdList - Hot/Cold ခွဲထိုး\n`;
     helpText += `• 🧬 Smart Hybrid - AI 20ပွဲ + Website\n`;
-    helpText += `• 🧠 AI Brain - Master Decision Engine\n\n`;
-    helpText += `🧠 *AI Brain Logic*\n`;
-    helpText += `• AI 20ပွဲမှန်နှုန်း 70%+ → AI ယုံ\n`;
-    helpText += `• AI 5ပွဲမှား + Web 3ဆက် → Web Follow\n`;
-    helpText += `• Web 4ဆက် → Reverse ထိုး\n`;
-    helpText += `• AI 7+ မှား → AI Recovery\n`;
+    helpText += `• 🧠 AI Brain v2 - 8 Rules Master\n\n`;
+    helpText += `🧠 *AI Brain v2 Logic (8 Rules)*\n`;
+    helpText += `• AI 2+မှား + 5ပွဲ<40% → Follow\n`;
+    helpText += `• AI 4+မှား + Web 2+ → Follow\n`;
+    helpText += `• Web 4+ဆက် → Reverse\n`;
+    helpText += `• AI 5+မှား → Recovery\n`;
+    helpText += `• AI 3-4မှား + Web 3+ → Follow\n`;
+    helpText += `• AI 10ပွဲ<50% → Follow\n`;
+    helpText += `• AI 70%+ + မှား1- → AI Trust\n`;
+    helpText += `• Default → AI/Wisdom\n`;
     
     await bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
 });
@@ -1282,15 +1301,15 @@ http.createServer((req, res) => {
         });
     } else { 
         res.writeHead(200); 
-        res.end('WinGo Pro Bot v3.0 - AI Brain + 6 Auto Modes'); 
+        res.end('WinGo Pro Bot v3.0 - AI Brain v2 + 8 Rules Engine'); 
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`📡 Channel ID: ${PUBLIC_CHANNEL_ID}`);
-    console.log(`🧠 AI Brain Mode: ACTIVE`);
+    console.log(`🧠 AI Brain v2 (8 Rules): ACTIVE`);
     console.log(`🔃 Reverse Mode: ACTIVE`);
     console.log(`🧬 Smart Hybrid (AI 20): ACTIVE`);
     console.log(`📊 Mode Performance Tracker: ACTIVE`);
 });
 
-console.log("✅ WinGo Pro Bot v3.0 - AI Brain + Reverse + Hybrid + 6 Auto Modes");
+console.log("✅ WinGo Pro Bot v3.0 - AI Brain v2 + 8 Rules Engine + 6 Auto Modes");
