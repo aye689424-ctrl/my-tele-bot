@@ -1312,4 +1312,4 @@ http.createServer((req, res) => {
     console.log(`📊 Mode Performance Tracker: ACTIVE`);
 });
 
-console.log("✅ WinGo Pro Bot v3.0 - AI Brain v2 + 8 Rules Engine + 6 Auto Modes");
+console.log("✅ WinGo Pro Bot 3.0 - AI Brain v2 + 8 Rules Engine + 6 Auto Modes");
