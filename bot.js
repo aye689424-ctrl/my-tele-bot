@@ -365,7 +365,7 @@ function formatLossStreakReport(aiLogs) {
     let report = `📉 **AI အမှားအများဆုံး ပွဲဆက် မှတ်တမ်း**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔥 **အဆိုးဆုံး အမှားအဆက်:** ${analysis.maxStreak} ပွဲဆက်\n\n`;
     if (analysis.worstStreak) {
         report += `📌 **စတင်သည့်ပွဲ:** ${analysis.worstStreak.startIssue}\n📌 **ပြီးဆုံးသည့်ပွဲ:** ${analysis.worstStreak.endIssue}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 **အသေးစိတ် မှတ်တမ်း:**\n\n`;
-        analysis.worstStreak.lossDetails.forEach((loss, idx) => { report += `${idx+1}. ပွဲစဉ် ${loss.issue} | ခန့်: ${loss.prediction} | ထွက်: ${loss.result} (${loss.number})\n`; });
+        analysis.worstStreak.lossDetails.forEach((loss, idx) => { report += `$က{idx+1}. ပွဲစဉ် ${loss.issue} | ခန့်: ${loss.prediction} | ထွက်: ${loss.result} (${loss.number})\n`; });
     }
     return report;
 }
@@ -1200,10 +1200,10 @@ bot.on('message', async (msg) => {
     
     if (text === "📈 AI History") {
         if (!data.aiLogs||data.aiLogs.length===0) return bot.sendMessage(chatId,"📊 AI မှတ်တမ်းမရှိသေးပါ");
-        const recent20 = data.aiLogs.slice(0, 20);
-        let wins = recent20.filter(l=>l.status==="✅").length;
-        let txt = `📈 *${data.nickname || 'My'} AI History (20 ပွဲ)*\n━━━━━━━━━━━━━━━━\n📊 ${wins}/${recent20.length} (မှန်နှုန်း: ${((wins/recent20.length)*100).toFixed(1)}%)\n━━━━━━━━━━━━━━━━\n`;
-        recent20.forEach((log,i)=>{ txt+=`${i+1}. ${log.status} ${log.issue} | ${log.prediction}→${log.result} | ${log.number||''}\n`; });
+        const recent100 = data.aiLogs.slice(0, 100);
+        let wins = recent100.filter(l=>l.status==="✅").length;
+        let txt = `📈 *${data.nickname || 'My'} AI History (100 ပွဲ)*\n━━━━━━━━━━━━━━━━\n📊 ${wins}/${recent100.length} (မှန်နှုန်း: ${((wins/recent100.length)*100).toFixed(1)}%)\n━━━━━━━━━━━━━━━━\n`;
+        recent100.forEach((log,i)=>{ txt+=`${i+1}. ${log.status} ${log.issue} | ${log.prediction}→${log.result} | ${log.number||''}\n`; });
         return bot.sendMessage(chatId, txt);
     }
     
