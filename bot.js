@@ -673,192 +673,199 @@ function updateBrainStats(data, mode, isWin) {
     data.brainStats.currentBestMode = bestMode;
 }
 
-// ========== MONITORING LOOP ==========
+// ========== MONITORING LOOP (with error handling) ==========
 async function monitoringLoop(chatId) {
     while (true) {
         let data = getUserData(chatId);
         if (!data.running) break;
-        await syncBetHistoryFromAPI(chatId);
-        data = getUserData(chatId);
-        const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 5, typeId: 30 }, data.token);
-        if (res?.msgCode === 0 && res.data?.list?.length > 0) {
-            const history = res.data.list;
-            const lastRound = history[0];
-            const currentIssue = lastRound.issueNumber;
-            const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
-            const realNumber = lastRound.number;
-            const nextIssue = (BigInt(currentIssue) + 1n).toString();
-            
-            if (currentIssue !== data.last_issue) {
-                await checkBalance(chatId);
-                data = getUserData(chatId);
+        
+        try {
+            await syncBetHistoryFromAPI(chatId);
+            data = getUserData(chatId);
+            const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 5, typeId: 30 }, data.token);
+            if (res?.msgCode === 0 && res.data?.list?.length > 0) {
+                const history = res.data.list;
+                const lastRound = history[0];
+                const currentIssue = lastRound.issueNumber;
+                const realSide = parseInt(lastRound.number) >= 5 ? "Big" : "Small";
+                const realNumber = lastRound.number;
+                const nextIssue = (BigInt(currentIssue) + 1n).toString();
                 
-                let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === currentIssue.slice(-5));
-                let betResult = null;
-                if (pendingBet) {
-                    const isWin = pendingBet.side === realSide;
-                    let pnlAmount = 0;
-                    if (isWin) {
-                        pendingBet.status = "✅ WIN";
-                        pendingBet.pnl = +(pendingBet.amount * 0.96).toFixed(2);
-                        pnlAmount = pendingBet.pnl;
-                        data.totalProfit += pnlAmount;
-                        if (pendingBet.isAuto) {
-                            data.sessionWins++;
-                            data.totalWins++;
-                            data.consecutiveWins++;
-                            data.consecutiveLosses = 0;
-                            if (data.sessionWins >= data.stopLimit) {
-                                await bot.sendMessage(chatId, `🛑 Stop Limit ပြည့်ပါပြီ! (${data.stopLimit} ပွဲနိုင်)`);
-                                data.autoRunning = false; data.autoMode = null; data.currentBetStep = 0; data.consecutiveWins = 0; data.sessionWins = 0;
-                            } else { data.currentBetStep = 0; }
-                        } else { data.manualBetLock = false; data.manualBetIssue = null; }
-                        if (pendingBet.mode) updateBrainStats(data, pendingBet.mode, true);
-                    } else {
-                        pendingBet.status = "❌ LOSS";
-                        pendingBet.pnl = -pendingBet.amount;
-                        pnlAmount = pendingBet.pnl;
-                        data.totalProfit += pnlAmount;
-                        if (pendingBet.isAuto) {
-                            data.consecutiveWins = 0;
-                            data.consecutiveLosses++;
-                            const nextStep = data.currentBetStep + 1;
-                            if (nextStep < data.betPlan.length) data.currentBetStep = nextStep;
-                            else { 
-                                await bot.sendMessage(chatId, `❌ Max step ရောက်။ Auto Bet ရပ်။`); 
-                                data.autoRunning = false; data.autoMode = null; data.currentBetStep = 0; data.sessionWins = 0; 
-                            }
-                        } else { data.manualBetLock = false; data.manualBetIssue = null; }
-                        if (pendingBet.mode) updateBrainStats(data, pendingBet.mode, false);
-                    }
-                    betResult = { ...pendingBet, resultNumber: realNumber, resultSide: realSide };
-                    saveUserData(chatId, data);
-                    await sendBetResultToUser(chatId, data, betResult);   // user only
-                    updateActiveUser(chatId, data.nickname || `95****${(data.username || '').slice(-3)}`);
+                if (currentIssue !== data.last_issue) {
+                    await checkBalance(chatId);
                     data = getUserData(chatId);
-                }
-                
-                if (data.last_pred) {
-                    const aiCorrect = (data.last_pred === realSide);
-                    data.aiLogs.unshift({ status: aiCorrect ? "✅" : "❌", issue: currentIssue.slice(-5), result: realSide, prediction: data.last_pred, number: realNumber });
-                    if (data.aiLogs.length > 100) data.aiLogs = data.aiLogs.slice(0, 100);
-                    const nickname = data.nickname || `95****${(data.username || '').slice(-3)}`;
-                    addToPublicAILogs({ status: aiCorrect ? "✅" : "❌", issue: currentIssue.slice(-5), result: realSide, prediction: data.last_pred, number: realNumber }, nickname);
-                    if (!pendingBet || !pendingBet.isAuto) { data.consecutiveLosses = aiCorrect ? 0 : data.consecutiveLosses + 1; }
-                    saveUserData(chatId, data);
-                    data = getUserData(chatId);
-                }
-                
-                const ai = runAI(history);
-                data.last_issue = currentIssue;
-                data.last_pred = ai.side;
-                saveUserData(chatId, data);
-                
-                if (data.autoRunning && !data.manualBetLock) {
-                    let betSide = null, betAmount = data.betPlan[data.currentBetStep], betReason = "";
                     
-                    if (data.autoMode === 'follow') { 
-                        betSide = realSide; 
-                        betReason = `🔄 Follow - ${realSide} လိုက်ထိုး`; 
-                    } else if (data.autoMode === 'reverse') {
-                        betSide = realSide === "Big" ? "Small" : "Big";
-                        betReason = `🔃 Reverse - ${realSide} ထွက်၍ ပြောင်းပြန်ထိုး`;
-                    } else if (data.autoMode === 'ai_correction') { 
-                        if (data.consecutiveLosses >= data.lossStartLimit) { 
-                            betSide = data.last_pred; 
-                            betReason = `🤖 AI Correction - ${data.consecutiveLosses} ပွဲဆက်မှား၍ ထိုး`; 
-                        } 
-                    } else if (data.autoMode === 'emerdlist') { 
-                        const pred = await getEmerdListPrediction(chatId, data.token); 
-                        betSide = pred.prediction; 
-                        betReason = `🧠 GetEmerdList - ${pred.reason}`; 
-                    } else if (data.autoMode === 'hybrid') {
-                        const aiHistory = data.aiLogs || [];
-                        const recentAI = aiHistory.slice(0, 20);
-                        const recentLosses = recentAI.filter(log => log.status === "❌").length;
-                        const correctCount = recentAI.filter(log => log.status === "✅").length;
-                        const aiAccuracy = recentAI.length > 0 ? correctCount / recentAI.length : 0;
-                        
-                        if (aiAccuracy >= 0.70 && recentLosses === 0) {
-                            betSide = data.last_pred;
-                            betReason = `🧬 Hybrid: AI 20ပွဲမှန်နှုန်း ${(aiAccuracy*100).toFixed(0)}% → AI လိုက်ထိုး`;
-                        } else if (recentLosses >= 2 && recentLosses <= 4) {
-                            betSide = realSide;
-                            betReason = `🧬 Hybrid: AI ${recentLosses}ပွဲဆက်မှား → Website Follow`;
-                        } else if (recentLosses >= 5) {
-                            betSide = data.last_pred;
-                            betReason = `🧬 Hybrid: AI ${recentLosses}ပွဲဆက်မှား → AI ပြန်မှန်ချိန်`;
+                    let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === currentIssue.slice(-5));
+                    let betResult = null;
+                    if (pendingBet) {
+                        const isWin = pendingBet.side === realSide;
+                        let pnlAmount = 0;
+                        if (isWin) {
+                            pendingBet.status = "✅ WIN";
+                            pendingBet.pnl = +(pendingBet.amount * 0.96).toFixed(2);
+                            pnlAmount = pendingBet.pnl;
+                            data.totalProfit += pnlAmount;
+                            if (pendingBet.isAuto) {
+                                data.sessionWins++;
+                                data.totalWins++;
+                                data.consecutiveWins++;
+                                data.consecutiveLosses = 0;
+                                if (data.sessionWins >= data.stopLimit) {
+                                    await bot.sendMessage(chatId, `🛑 Stop Limit ပြည့်ပါပြီ! (${data.stopLimit} ပွဲနိုင်)`);
+                                    data.autoRunning = false; data.autoMode = null; data.currentBetStep = 0; data.consecutiveWins = 0; data.sessionWins = 0;
+                                } else { data.currentBetStep = 0; }
+                            } else { data.manualBetLock = false; data.manualBetIssue = null; }
+                            if (pendingBet.mode) updateBrainStats(data, pendingBet.mode, true);
                         } else {
-                            betSide = data.last_pred;
-                            betReason = `🧬 Hybrid: AI ${(aiAccuracy*100).toFixed(0)}% မှန် → AI အတိုင်းထိုး`;
+                            pendingBet.status = "❌ LOSS";
+                            pendingBet.pnl = -pendingBet.amount;
+                            pnlAmount = pendingBet.pnl;
+                            data.totalProfit += pnlAmount;
+                            if (pendingBet.isAuto) {
+                                data.consecutiveWins = 0;
+                                data.consecutiveLosses++;
+                                const nextStep = data.currentBetStep + 1;
+                                if (nextStep < data.betPlan.length) data.currentBetStep = nextStep;
+                                else { 
+                                    await bot.sendMessage(chatId, `❌ Max step ရောက်။ Auto Bet ရပ်။`); 
+                                    data.autoRunning = false; data.autoMode = null; data.currentBetStep = 0; data.sessionWins = 0; 
+                                }
+                            } else { data.manualBetLock = false; data.manualBetIssue = null; }
+                            if (pendingBet.mode) updateBrainStats(data, pendingBet.mode, false);
                         }
-                    } else if (data.autoMode === 'ai_brain') {
-                        const brainDecision = aiBrainDecide(data, history, realSide, realNumber);
-                        betSide = brainDecision.side;
-                        betReason = brainDecision.reason;
-                        betReason += `\n📊 AIမှန်:${brainDecision.stats.aiAccuracy20} | AIမှားဆက်:${brainDecision.stats.aiLossStreak} | Web:${brainDecision.stats.websiteStreak}`;
+                        betResult = { ...pendingBet, resultNumber: realNumber, resultSide: realSide };
+                        saveUserData(chatId, data);
+                        await sendBetResultToUser(chatId, data, betResult);   // user only
+                        updateActiveUser(chatId, data.nickname || `95****${(data.username || '').slice(-3)}`);
+                        data = getUserData(chatId);
                     }
                     
-                    if (betSide) {
-                        await checkBalance(chatId);
+                    if (data.last_pred) {
+                        const aiCorrect = (data.last_pred === realSide);
+                        data.aiLogs.unshift({ status: aiCorrect ? "✅" : "❌", issue: currentIssue.slice(-5), result: realSide, prediction: data.last_pred, number: realNumber });
+                        if (data.aiLogs.length > 100) data.aiLogs = data.aiLogs.slice(0, 100);
+                        const nickname = data.nickname || `95****${(data.username || '').slice(-3)}`;
+                        addToPublicAILogs({ status: aiCorrect ? "✅" : "❌", issue: currentIssue.slice(-5), result: realSide, prediction: data.last_pred, number: realNumber }, nickname);
+                        if (!pendingBet || !pendingBet.isAuto) { data.consecutiveLosses = aiCorrect ? 0 : data.consecutiveLosses + 1; }
+                        saveUserData(chatId, data);
                         data = getUserData(chatId);
-                        
-                        await bot.sendMessage(chatId, `⏰ ပွဲစဉ် ${nextIssue.slice(-5)} အတွက် ၅ စက္ကန့်စောင့်ပြီး ထိုးပါမည်...\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\n📝 ${betReason}`);
-                        const betWindowReady = await waitForBetWindow(chatId, nextIssue, 10000);
-                        await placeBetNow(chatId, betSide, betAmount, nextIssue, data.currentBetStep, true, betReason);
                     }
+                    
+                    const ai = runAI(history);
+                    data.last_issue = currentIssue;
+                    data.last_pred = ai.side;
+                    saveUserData(chatId, data);
+                    
+                    if (data.autoRunning && !data.manualBetLock) {
+                        let betSide = null, betAmount = data.betPlan[data.currentBetStep], betReason = "";
+                        
+                        if (data.autoMode === 'follow') { 
+                            betSide = realSide; 
+                            betReason = `🔄 Follow - ${realSide} လိုက်ထိုး`; 
+                        } else if (data.autoMode === 'reverse') {
+                            betSide = realSide === "Big" ? "Small" : "Big";
+                            betReason = `🔃 Reverse - ${realSide} ထွက်၍ ပြောင်းပြန်ထိုး`;
+                        } else if (data.autoMode === 'ai_correction') { 
+                            if (data.consecutiveLosses >= data.lossStartLimit) { 
+                                betSide = data.last_pred; 
+                                betReason = `🤖 AI Correction - ${data.consecutiveLosses} ပွဲဆက်မှား၍ ထိုး`; 
+                            } 
+                        } else if (data.autoMode === 'emerdlist') { 
+                            const pred = await getEmerdListPrediction(chatId, data.token); 
+                            betSide = pred.prediction; 
+                            betReason = `🧠 GetEmerdList - ${pred.reason}`; 
+                        } else if (data.autoMode === 'hybrid') {
+                            const aiHistory = data.aiLogs || [];
+                            const recentAI = aiHistory.slice(0, 20);
+                            const recentLosses = recentAI.filter(log => log.status === "❌").length;
+                            const correctCount = recentAI.filter(log => log.status === "✅").length;
+                            const aiAccuracy = recentAI.length > 0 ? correctCount / recentAI.length : 0;
+                            
+                            if (aiAccuracy >= 0.70 && recentLosses === 0) {
+                                betSide = data.last_pred;
+                                betReason = `🧬 Hybrid: AI 20ပွဲမှန်နှုန်း ${(aiAccuracy*100).toFixed(0)}% → AI လိုက်ထိုး`;
+                            } else if (recentLosses >= 2 && recentLosses <= 4) {
+                                betSide = realSide;
+                                betReason = `🧬 Hybrid: AI ${recentLosses}ပွဲဆက်မှား → Website Follow`;
+                            } else if (recentLosses >= 5) {
+                                betSide = data.last_pred;
+                                betReason = `🧬 Hybrid: AI ${recentLosses}ပွဲဆက်မှား → AI ပြန်မှန်ချိန်`;
+                            } else {
+                                betSide = data.last_pred;
+                                betReason = `🧬 Hybrid: AI ${(aiAccuracy*100).toFixed(0)}% မှန် → AI အတိုင်းထိုး`;
+                            }
+                        } else if (data.autoMode === 'ai_brain') {
+                            const brainDecision = aiBrainDecide(data, history, realSide, realNumber);
+                            betSide = brainDecision.side;
+                            betReason = brainDecision.reason;
+                            betReason += `\n📊 AIမှန်:${brainDecision.stats.aiAccuracy20} | AIမှားဆက်:${brainDecision.stats.aiLossStreak} | Web:${brainDecision.stats.websiteStreak}`;
+                        }
+                        
+                        if (betSide) {
+                            await checkBalance(chatId);
+                            data = getUserData(chatId);
+                            
+                            await bot.sendMessage(chatId, `⏰ ပွဲစဉ် ${nextIssue.slice(-5)} အတွက် ၅ စက္ကန့်စောင့်ပြီး ထိုးပါမည်...\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\n📝 ${betReason}`);
+                            const betWindowReady = await waitForBetWindow(chatId, nextIssue, 10000);
+                            await placeBetNow(chatId, betSide, betAmount, nextIssue, data.currentBetStep, true, betReason);
+                        }
+                    }
+                    
+                    // ========== VIP SIGNAL (Channel မပို့) ==========
+                    const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
+                    const nickname = data.nickname || `User ${chatId.slice(-3)}`;
+                    let modeText = "⚪️ Manual";
+                    if (data.autoRunning) {
+                        if (data.autoMode === 'follow') modeText = "🟢 Follow";
+                        else if (data.autoMode === 'reverse') modeText = "🔃 Reverse";
+                        else if (data.autoMode === 'ai_correction') modeText = "🟡 AI Correction";
+                        else if (data.autoMode === 'emerdlist') modeText = "🧠 GetEmerdList";
+                        else if (data.autoMode === 'hybrid') modeText = "🧬 Smart Hybrid";
+                        else if (data.autoMode === 'ai_brain') modeText = "🧠 AI Brain";
+                    }
+                    
+                    let statusMsg = `💥 *${nickname} - VIP SIGNAL* 💥\n`;
+                    statusMsg += `━━━━━━━━━━━━━━━━\n`;
+                    statusMsg += `🗓 Period: ${currentIssue}\n`;
+                    statusMsg += `🎲 Result: ${realSide} (${realNumber})\n`;
+                    statusMsg += `🤖 AI Pred: ${data.last_pred}\n`;
+                    statusMsg += `📊 Mode: ${modeText}\n`;
+                    statusMsg += `💰 Profit: ${data.totalProfit.toFixed(2)} MMK\n`;
+                    statusMsg += `🏦 Balance: ${(data.currentBalance || 0).toFixed(2)} MMK\n`;
+                    const winsDisplay = data.autoRunning ? data.sessionWins : 0;
+                    statusMsg += `🏆 Wins: ${winsDisplay}/${data.stopLimit}\n`;
+                    const lossStreakShort = formatLossStreakShort(data.aiLogs);
+                    statusMsg += `📉 ${lossStreakShort}\n`;
+                    
+                    if (data.autoMode === 'ai_brain' && data.brainStats) {
+                        statusMsg += `🧠 Best Mode: ${data.brainStats.currentBestMode || 'N/A'}\n`;
+                    }
+                    
+                    statusMsg += `━━━━━━━━━━━━━━━━\n`;
+                    statusMsg += `🚀 Next: ${nextIssue.slice(-5)} (${mmTime})\n`;
+                    statusMsg += `🦸 ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
+                    if (data.consecutiveLosses > 0) {
+                        statusMsg += `⚠️ လက်ရှိအမှားဆက်: ${data.consecutiveLosses} ပွဲ`;
+                        if (data.consecutiveLosses >= 7) statusMsg += ` (7 ပွဲဆက်မှား - သတိထားပါ)`;
+                        statusMsg += `\n`;
+                    }
+                    statusMsg += `━━━━━━━━━━━━━━━━\n`;
+                    statusMsg += `${formatAIHistoryForVIP(data.aiLogs, 50)}`;   // changed to 50
+                    
+                    addToPublicSignals({ username: nickname, issue: currentIssue.slice(-5), prediction: data.last_pred, aiPred: data.last_pred, mode: modeText, profit: data.totalProfit.toFixed(2) });
+                    
+                    await bot.sendMessage(chatId, statusMsg, { 
+                        parse_mode: "Markdown",
+                        reply_markup: { inline_keyboard: [[{ text: "🔵 Big", callback_data: "bet_Big" }, { text: "🔴 Small", callback_data: "bet_Small" }]] } 
+                    });
+                    // Channel ကို မပို့တော့ပါ
                 }
-                
-                // ========== VIP SIGNAL (Channel မပို့) ==========
-                const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
-                const nickname = data.nickname || `User ${chatId.slice(-3)}`;
-                let modeText = "⚪️ Manual";
-                if (data.autoRunning) {
-                    if (data.autoMode === 'follow') modeText = "🟢 Follow";
-                    else if (data.autoMode === 'reverse') modeText = "🔃 Reverse";
-                    else if (data.autoMode === 'ai_correction') modeText = "🟡 AI Correction";
-                    else if (data.autoMode === 'emerdlist') modeText = "🧠 GetEmerdList";
-                    else if (data.autoMode === 'hybrid') modeText = "🧬 Smart Hybrid";
-                    else if (data.autoMode === 'ai_brain') modeText = "🧠 AI Brain";
-                }
-                
-                let statusMsg = `💥 *${nickname} - VIP SIGNAL* 💥\n`;
-                statusMsg += `━━━━━━━━━━━━━━━━\n`;
-                statusMsg += `🗓 Period: ${currentIssue}\n`;
-                statusMsg += `🎲 Result: ${realSide} (${realNumber})\n`;
-                statusMsg += `🤖 AI Pred: ${data.last_pred}\n`;
-                statusMsg += `📊 Mode: ${modeText}\n`;
-                statusMsg += `💰 Profit: ${data.totalProfit.toFixed(2)} MMK\n`;
-                statusMsg += `🏦 Balance: ${(data.currentBalance || 0).toFixed(2)} MMK\n`;
-                const winsDisplay = data.autoRunning ? data.sessionWins : 0;
-                statusMsg += `🏆 Wins: ${winsDisplay}/${data.stopLimit}\n`;
-                const lossStreakShort = formatLossStreakShort(data.aiLogs);
-                statusMsg += `📉 ${lossStreakShort}\n`;
-                
-                if (data.autoMode === 'ai_brain' && data.brainStats) {
-                    statusMsg += `🧠 Best Mode: ${data.brainStats.currentBestMode || 'N/A'}\n`;
-                }
-                
-                statusMsg += `━━━━━━━━━━━━━━━━\n`;
-                statusMsg += `🚀 Next: ${nextIssue.slice(-5)} (${mmTime})\n`;
-                statusMsg += `🦸 ခန့်မှန်း: ${data.last_pred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
-                if (data.consecutiveLosses > 0) {
-                    statusMsg += `⚠️ လက်ရှိအမှားဆက်: ${data.consecutiveLosses} ပွဲ`;
-                    if (data.consecutiveLosses >= 7) statusMsg += ` (7 ပွဲဆက်မှား - သတိထားပါ)`;
-                    statusMsg += `\n`;
-                }
-                statusMsg += `━━━━━━━━━━━━━━━━\n`;
-                statusMsg += `${formatAIHistoryForVIP(data.aiLogs, 50)}`;   // changed to 50
-                
-                addToPublicSignals({ username: nickname, issue: currentIssue.slice(-5), prediction: data.last_pred, aiPred: data.last_pred, mode: modeText, profit: data.totalProfit.toFixed(2) });
-                
-                await bot.sendMessage(chatId, statusMsg, { 
-                    parse_mode: "Markdown",
-                    reply_markup: { inline_keyboard: [[{ text: "🔵 Big", callback_data: "bet_Big" }, { text: "🔴 Small", callback_data: "bet_Small" }]] } 
-                });
-                // Channel ကို မပို့တော့ပါ
             }
+        } catch (error) {
+            console.error(`Monitoring loop error for chat ${chatId}:`, error);
+            // အလိုအလျောက် ဆက်သွားအောင် error မှတ်ပြီး loop ဆက်မယ်
         }
+        
         await new Promise(r => setTimeout(r, 800));
     }
 }
@@ -1080,7 +1087,7 @@ bot.on('message', async (msg) => {
     if (text === "⚙️ Settings") return bot.sendMessage(chatId,"⚙️ Settings Menu", settingsMenu);
     if (text === "🎲 Set Bet Plan") { data.settingMode="betplan"; saveUserData(chatId,data); return bot.sendMessage(chatId,`📝 Bet Plan ထည့်ပါ\n\nလက်ရှိ: ${data.betPlan.join(' → ')}\n\nဥပမာ: 10,30,60,90,150,250,400,650`); }
     if (text === "🛑 Set Stop Limit") { data.settingMode="stoplimit"; saveUserData(chatId,data); return bot.sendMessage(chatId,`🏆 Stop Limit ထည့်ပါ\n\nလက်ရှိ: ${data.stopLimit} ပွဲ`); }
-    if (text === "⚠️ Set Loss Start") { data.settingMode="lossstart"; saveUserData(chatId,data); return bot.sendMessage(chatId,`⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\nလက်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`); }
+    if (text === "⚠️ Set Loss Start") { data.settingMode="lossstart"; saveUserData(chatId,data); return bot.sendMessage(chatId,`⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\n�က်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`); }
     if (text === "🔙 Main Menu") { delete data.settingMode; saveUserData(chatId,data); return bot.sendMessage(chatId,"Main Menu", mainMenu); }
     
     if (text === "📊 Status") {
