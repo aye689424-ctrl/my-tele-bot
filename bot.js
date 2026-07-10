@@ -148,7 +148,6 @@ function getUserData(chatId) {
         };
         saveAllData(allUsers);
     }
-    // Ensure all nested objects exist for old data
     if (!allUsers[chatId].brainStats) {
         allUsers[chatId].brainStats = {
             totalPredictions: 0,
@@ -166,7 +165,6 @@ function getUserData(chatId) {
             lastModeSwitch: null,
             consecutiveModeFailures: 0
         };
-        saveAllData(allUsers);
     }
     if (!allUsers[chatId].brainStats.modePerformance.cautious) {
         allUsers[chatId].brainStats.modePerformance.cautious = { wins: 0, losses: 0 };
@@ -187,6 +185,27 @@ function getUserData(chatId) {
 function saveUserData(chatId, data) {
     allUsers[chatId] = data;
     saveAllData(allUsers);
+}
+
+// ========== KELLY CRITERION (FIXED) ==========
+function kellyCriterionBetSize(confidence, balance, baseBet) {
+    const b = 0.96;
+    const p = confidence / 100;
+    const q = 1 - p;
+    
+    let kellyFraction = (b * p - q) / b;
+    kellyFraction = Math.max(0, kellyFraction * 0.4);
+    
+    const maxBet = balance * 0.05;
+    const kellyBet = balance * kellyFraction;
+    
+    // အနည်းဆုံး baseBet (Bet Plan ရဲ့ လက်ရှိအဆင့်) အတိုင်းထိုးမယ်
+    // Kelly က baseBet ထက်နည်းရင် baseBet အတိုင်းပဲထိုး
+    // Kelly က baseBet ထက်များရင် Kelly အတိုင်းထိုး (ဒါပေမယ့် maxBet ထက်မကျော်ရ)
+    const finalBet = Math.min(Math.max(kellyBet, baseBet), maxBet);
+    
+    // အနည်းဆုံး 10 ကျပ် ဖြစ်အောင်
+    return Math.max(Math.round(finalBet), 10);
 }
 
 // ========== ENSEMBLE AI ENGINE ==========
@@ -524,20 +543,6 @@ class EnsemblePredictor {
 }
 
 const ensemblePredictor = new EnsemblePredictor();
-
-function kellyCriterionBetSize(confidence, balance, baseBet) {
-    const b = 0.96;
-    const p = confidence / 100;
-    const q = 1 - p;
-    
-    let kellyFraction = (b * p - q) / b;
-    kellyFraction = Math.max(0, kellyFraction * 0.4);
-    
-    const maxBet = balance * 0.05;
-    const kellyBet = balance * kellyFraction;
-    
-    return Math.round(Math.min(Math.max(kellyBet, baseBet), maxBet));
-}
 
 // ========== SMART MEMORY ANALYZER ==========
 function updateSmartMemory(chatId, userData, realSide, realNumber, aiSide) {
@@ -1265,10 +1270,8 @@ async function monitoringLoop(chatId) {
                     await checkBalance(chatId);
                     data = getUserData(chatId);
 
-                    // Update Smart Memory
                     const memoryResult = updateSmartMemory(chatId, data, realSide, realNumber, data.last_pred || "Big");
                     
-                    // Check for VIP Signal
                     if (memoryResult.pattern && data.vipSignalsEnabled) {
                         const nextIss = await getNextIssue(chatId, data.token);
                         const vipMsg = getVipSignalMessage(chatId, data, memoryResult.pattern, data.last_pred || "Big", nextIss);
@@ -1292,7 +1295,6 @@ async function monitoringLoop(chatId) {
                         saveSmartMemory(smartMemory);
                     }
 
-                    // Resolve pending bet
                     let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === currentIssue.slice(-5));
                     let betResult = null;
                     if (pendingBet) {
@@ -1356,7 +1358,6 @@ async function monitoringLoop(chatId) {
                         data = getUserData(chatId);
                     }
 
-                    // AI log update
                     if (data.last_pred) {
                         const aiCorrect = (data.last_pred === realSide);
                         data.aiLogs.unshift({
@@ -1382,13 +1383,11 @@ async function monitoringLoop(chatId) {
                         data = getUserData(chatId);
                     }
 
-                    // AI prediction for next round
                     const ai = runAI(history);
                     data.last_issue = currentIssue;
                     data.last_pred = ai.side;
                     saveUserData(chatId, data);
 
-                    // Auto betting logic
                     if (data.autoRunning && !data.manualBetLock) {
                         let betSide = null;
                         let betAmount = data.betPlan[data.currentBetStep];
@@ -1499,7 +1498,6 @@ async function monitoringLoop(chatId) {
                         }
                     }
 
-                    // Regular Status Message
                     const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
                     const nickname = data.nickname || `User ${chatId.slice(-3)}`;
                     let modeText = "⚪️ Manual";
@@ -1660,7 +1658,7 @@ bot.on('message', async (msg) => {
         welcomeMsg += `  🧠 *Ensemble Ultra (8-in-1)* ← အသစ်!\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
         welcomeMsg += `🎯 *VIP Signal System* - Pattern Detection\n`;
-        welcomeMsg += `📊 *Kelly Criterion* - Smart Bet Sizing\n`;
+        welcomeMsg += `📊 *Kelly Criterion* - Smart Bet Sizing (Min: Bet Plan)\n`;
         welcomeMsg += `🧬 *Ensemble AI* - 8 Methods Combined\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n\n`;
         welcomeMsg += `ဖုန်းနံပါတ်ပေးပါ (သို့) Global Dashboard ကြည့်ပါ:`;
@@ -1877,6 +1875,7 @@ bot.on('message', async (msg) => {
         ensembleMsg += `  4. Monte Carlo Simulation\n  5. Anomaly Detection\n  6. Markov Chain\n`;
         ensembleMsg += `  7. AI Brain\n  8. Smart Hybrid\n\n`;
         ensembleMsg += `💰 *Kelly Criterion* - ယုံကြည်မှုအလိုက် ထိုးကြေးပြောင်း\n`;
+        ensembleMsg += `📌 *Min Bet = Bet Plan အတိုင်း* (10 ကျပ်အောက်မထိုး)\n`;
         ensembleMsg += `🔄 *Auto Weight Update* - မှန်/မှားပေါ်မူတည်၍ အလေးချိန်ပြောင်း\n`;
         ensembleMsg += `━━━━━━━━━━━━━━━━\nStop Limit: ${data.stopLimit}\nBet Plan: ${data.betPlan.join(' → ')}`;
         
@@ -1896,11 +1895,11 @@ bot.on('message', async (msg) => {
     }
     if (text === "🛑 Set Stop Limit") {
         data.settingMode = "stoplimit"; saveUserData(chatId, data);
-        return bot.sendMessage(chatId, `🏆 Stop Limit ထည့်ပါ\n\nလက်ရှိ: ${data.stopLimit} ပွဲ`);
+        return bot.sendMessage(chatId, `🏆 Stop Limit ထည့်ပါ\n\n�က်ရှိ: ${data.stopLimit} ပွဲ`);
     }
     if (text === "⚠️ Set Loss Start") {
         data.settingMode = "lossstart"; saveUserData(chatId, data);
-        return bot.sendMessage(chatId, `⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\nလက်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`);
+        return bot.sendMessage(chatId, `⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\n�က်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`);
     }
     if (text === "🔙 Main Menu") {
         delete data.settingMode; saveUserData(chatId, data);
@@ -2042,7 +2041,7 @@ bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id.toString();
     let helpText = `📖 *WinGo Pro Bot v4.0 - Ensemble Ultra*\n━━━━━━━━━━━━━━━━\n\n🤖 *Auto Modes (8 Modes)*\n`;
     helpText += `• 🔄 Follow - နောက်ဆုံးပွဲအတိုင်း\n• 🔃 Reverse - ပြောင်းပြန်ထိုး\n• 🤖 AI Correction - AI မှားချိန်မှထိုး\n• 🧠 GetEmerdList - Hot/Cold+Trend\n• 🧬 Smart Hybrid - AI+Website ပေါင်း\n• 🧠 AI Brain - Master Decision\n• 🧠 Cautious Brain - Markov Chain + AI\n• 🧠 *Ensemble Ultra* - 8 Methods Combined!\n`;
-    helpText += `\n🧬 *Ensemble Ultra Features:*\n• Multi-Timeframe Analysis\n• Weighted Voting (7 modes)\n• Pattern Matching Engine\n• Monte Carlo Simulation\n• Anomaly Detection\n• Markov Chain Prediction\n• AI Brain + Hybrid\n• Kelly Criterion Bet Sizing\n• Auto Weight Adjustment\n`;
+    helpText += `\n🧬 *Ensemble Ultra Features:*\n• Multi-Timeframe Analysis\n• Weighted Voting (7 modes)\n• Pattern Matching Engine\n• Monte Carlo Simulation\n• Anomaly Detection\n• Markov Chain Prediction\n• AI Brain + Hybrid\n• Kelly Criterion (Min: Bet Plan)\n• Auto Weight Adjustment\n`;
     await bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
 });
 
@@ -2107,13 +2106,13 @@ http.createServer((req, res) => {
         });
     } else {
         res.writeHead(200);
-        res.end('WinGo Pro Bot v4.0 - Ensemble Ultra AI');
+        res.end('WinGo Pro Bot v4.0 - Ensemble Ultra AI (Fixed Kelly)');
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🧬 Ensemble Ultra AI: ACTIVE`);
     console.log(`🎯 VIP Signal System: READY`);
-    console.log(`📊 Kelly Criterion: ENABLED`);
+    console.log(`📊 Kelly Criterion: ENABLED (Min: Bet Plan, Min: 10 MMK)`);
 });
 
-console.log("✅ WinGo Pro Bot v4.0 - Ensemble Ultra AI (8-in-1) - BUG FIXED");
+console.log("✅ WinGo Pro Bot v4.0 - Ensemble Ultra AI (Kelly Fixed - Min 10 MMK)");
