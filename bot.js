@@ -22,6 +22,7 @@ bot.setWebHook(`${APP_URL}/bot${token}`).then(() => {
 const DATA_FILE = path.join(__dirname, 'user_data.json');
 const PUBLIC_DATA_FILE = path.join(__dirname, 'public_data.json');
 const MEMORY_FILE = path.join(__dirname, 'smart_memory.json');
+const ENSEMBLE_FILE = path.join(__dirname, 'ensemble_weights.json');
 
 function loadAllData() {
     try {
@@ -68,9 +69,34 @@ function saveSmartMemory(data) {
     } catch (e) {}
 }
 
+function loadEnsembleWeights() {
+    try {
+        if (fs.existsSync(ENSEMBLE_FILE)) {
+            return JSON.parse(fs.readFileSync(ENSEMBLE_FILE, 'utf8'));
+        }
+    } catch (e) {}
+    return {
+        timeframe: 1.2,
+        voting: 1.5,
+        pattern: 1.3,
+        monteCarlo: 1.1,
+        anomaly: 1.4,
+        markov: 1.3,
+        ai_brain: 1.4,
+        hybrid: 1.2
+    };
+}
+
+function saveEnsembleWeights(data) {
+    try {
+        fs.writeFileSync(ENSEMBLE_FILE, JSON.stringify(data, null, 2));
+    } catch (e) {}
+}
+
 let allUsers = loadAllData();
 let publicData = loadPublicData();
 let smartMemory = loadSmartMemory();
+let ensembleWeights = loadEnsembleWeights();
 
 // ========== USER DATA ==========
 function getUserData(chatId) {
@@ -102,6 +128,7 @@ function getUserData(chatId) {
             nickname: null,
             currentBalance: 0,
             vipSignalsEnabled: true,
+            ensembleMode: true,
             brainStats: {
                 totalPredictions: 0,
                 correctPredictions: 0,
@@ -111,7 +138,8 @@ function getUserData(chatId) {
                     ai_correction: { wins: 0, losses: 0 },
                     emerdlist: { wins: 0, losses: 0 },
                     hybrid: { wins: 0, losses: 0 },
-                    cautious: { wins: 0, losses: 0 }
+                    cautious: { wins: 0, losses: 0 },
+                    ensemble: { wins: 0, losses: 0 }
                 },
                 currentBestMode: null,
                 lastModeSwitch: null,
@@ -130,7 +158,8 @@ function getUserData(chatId) {
                 ai_correction: { wins: 0, losses: 0 },
                 emerdlist: { wins: 0, losses: 0 },
                 hybrid: { wins: 0, losses: 0 },
-                cautious: { wins: 0, losses: 0 }
+                cautious: { wins: 0, losses: 0 },
+                ensemble: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -142,8 +171,16 @@ function getUserData(chatId) {
         allUsers[chatId].brainStats.modePerformance.cautious = { wins: 0, losses: 0 };
         saveAllData(allUsers);
     }
+    if (!allUsers[chatId].brainStats.modePerformance.ensemble) {
+        allUsers[chatId].brainStats.modePerformance.ensemble = { wins: 0, losses: 0 };
+        saveAllData(allUsers);
+    }
     if (allUsers[chatId].vipSignalsEnabled === undefined) {
         allUsers[chatId].vipSignalsEnabled = true;
+        saveAllData(allUsers);
+    }
+    if (allUsers[chatId].ensembleMode === undefined) {
+        allUsers[chatId].ensembleMode = true;
         saveAllData(allUsers);
     }
     return allUsers[chatId];
@@ -152,6 +189,379 @@ function getUserData(chatId) {
 function saveUserData(chatId, data) {
     allUsers[chatId] = data;
     saveAllData(allUsers);
+}
+
+// ========== ENSEMBLE AI ENGINE ==========
+class EnsemblePredictor {
+    constructor() {
+        this.weights = loadEnsembleWeights();
+        this.learningRate = 0.05;
+        this.minWeight = 0.5;
+        this.maxWeight = 2.5;
+    }
+
+    // Multi-Timeframe Analysis
+    multiTimeframeAnalysis(history) {
+        if (history.length < 5) return null;
+        
+        const analyzeTimeframe = (data) => {
+            const sides = data.map(i => getSideFromNumber(i.number));
+            const bigCount = sides.filter(s => s === "Big").length;
+            const smallCount = sides.filter(s => s === "Small").length;
+            let prediction = bigCount > smallCount ? "Small" : "Big";
+            let confidence = Math.abs(bigCount - smallCount) / data.length * 100;
+            
+            // Streak analysis
+            let streak = 1;
+            for (let i = 1; i < sides.length; i++) {
+                if (sides[i] === sides[0]) streak++;
+                else break;
+            }
+            if (streak >= 3) {
+                prediction = sides[0] === "Big" ? "Small" : "Big";
+                confidence = Math.min(confidence + 15, 90);
+            }
+            
+            return { side: prediction, confidence };
+        };
+
+        const tf5 = analyzeTimeframe(history.slice(0, 5));
+        const tf10 = history.length >= 10 ? analyzeTimeframe(history.slice(0, 10)) : tf5;
+        const tf20 = history.length >= 20 ? analyzeTimeframe(history.slice(0, 20)) : tf10;
+        
+        const allSides = [tf5.side, tf10.side, tf20.side];
+        const agreeCount = allSides.filter(s => s === tf5.side).length;
+        
+        let confidence = 50;
+        if (agreeCount === 3) confidence = 85 + (tf5.confidence * 0.1);
+        else if (agreeCount === 2) confidence = 70 + (tf5.confidence * 0.05);
+        else confidence = 55;
+        
+        return {
+            side: tf5.side,
+            confidence: Math.min(confidence, 90),
+            method: "Multi-Timeframe",
+            details: `5:${tf5.side}(${tf5.confidence.toFixed(0)}%) 10:${tf10.side} 20:${tf20.side} | Agree:${agreeCount}/3`
+        };
+    }
+
+    // Weighted Voting System
+    weightedVoting(data, history, realSide) {
+        const votes = {};
+        
+        // Follow
+        votes.follow = { side: realSide, weight: this.weights.voting, accuracy: this.getLocalAccuracy(data, 'follow') };
+        
+        // Reverse
+        votes.reverse = { side: realSide === "Big" ? "Small" : "Big", weight: this.weights.voting * 0.9, accuracy: this.getLocalAccuracy(data, 'reverse') };
+        
+        // AI Correction
+        votes.ai_correction = { side: data.last_pred || "Big", weight: this.weights.voting * 1.1, accuracy: this.getLocalAccuracy(data, 'ai_correction') };
+        
+        // EmerdList (approximate)
+        votes.emerdlist = { side: data.last_pred || "Big", weight: this.weights.voting * 0.8, accuracy: this.getLocalAccuracy(data, 'emerdlist') };
+        
+        // Hybrid
+        votes.hybrid = { side: data.last_pred || "Big", weight: this.weights.voting * 1.2, accuracy: this.getLocalAccuracy(data, 'hybrid') };
+        
+        // AI Brain
+        votes.ai_brain = { side: data.last_pred || "Big", weight: this.weights.voting * 1.3, accuracy: this.getLocalAccuracy(data, 'ai_brain') };
+        
+        // Cautious/Markov
+        const histForMarkov = history.slice(0, 30).map(i => getSideFromNumber(i.number));
+        const markov = markovPredict(histForMarkov, 3);
+        votes.cautious = { side: markov.prediction || "Big", weight: this.weights.voting * 1.4, accuracy: this.getLocalAccuracy(data, 'cautious') };
+        
+        let bigScore = 0, smallScore = 0;
+        Object.entries(votes).forEach(([name, v]) => {
+            const adjWeight = v.weight * (v.accuracy || 0.5);
+            if (v.side === "Big") bigScore += adjWeight;
+            else smallScore += adjWeight;
+        });
+        
+        const totalVotes = bigScore + smallScore;
+        const confidence = Math.min(Math.abs(bigScore - smallScore) / totalVotes * 100, 90);
+        
+        return {
+            side: bigScore > smallScore ? "Big" : "Small",
+            confidence,
+            method: "Weighted Voting",
+            details: `Big:${bigScore.toFixed(1)} vs Small:${smallScore.toFixed(1)} (7 modes)`
+        };
+    }
+
+    // Pattern Matching Engine
+    patternMatching(memoryHistory, currentSequence) {
+        if (!memoryHistory || memoryHistory.length < 10) return null;
+        
+        const last5 = currentSequence.slice(-5).map(h => h.realSide);
+        let matches = [];
+        
+        for (let i = 5; i < memoryHistory.length; i++) {
+            const prev5 = memoryHistory.slice(i-5, i).map(h => h.realSide);
+            let similarity = 0;
+            for (let j = 0; j < 5; j++) {
+                if (prev5[j] === last5[j]) similarity++;
+            }
+            similarity /= 5;
+            
+            if (similarity >= 0.8) {
+                matches.push({ 
+                    index: i, 
+                    similarity, 
+                    nextResult: memoryHistory[i]?.realSide 
+                });
+            }
+        }
+        
+        if (matches.length >= 3) {
+            const nextResults = matches.map(m => m.nextResult).filter(r => r);
+            const bigCount = nextResults.filter(r => r === "Big").length;
+            const total = nextResults.length || 1;
+            const confidence = (Math.max(bigCount, total - bigCount) / total) * 100;
+            
+            return {
+                side: bigCount > total / 2 ? "Big" : "Small",
+                confidence: Math.min(confidence + 10, 88),
+                method: "Pattern Matching",
+                details: `${matches.length} similar patterns found (avg sim: ${(matches.reduce((s,m) => s+m.similarity,0)/matches.length*100).toFixed(0)}%)`
+            };
+        }
+        return null;
+    }
+
+    // Monte Carlo Simulation
+    monteCarloSimulation(history, simulations = 500) {
+        if (history.length < 10) return null;
+        
+        const sides = history.slice(0, 20).map(i => getSideFromNumber(i.number));
+        const transitions = {};
+        
+        for (let i = 0; i < sides.length - 1; i++) {
+            const curr = sides[i];
+            const next = sides[i + 1];
+            if (!transitions[curr]) transitions[curr] = { Big: 0, Small: 0, total: 0 };
+            transitions[curr][next]++;
+            transitions[curr].total++;
+        }
+        
+        Object.keys(transitions).forEach(state => {
+            transitions[state].BigProb = transitions[state].Big / transitions[state].total;
+            transitions[state].SmallProb = transitions[state].Small / transitions[state].total;
+        });
+        
+        const results = { Big: 0, Small: 0 };
+        let currentState = sides[sides.length - 1];
+        
+        for (let i = 0; i < simulations; i++) {
+            let state = currentState;
+            for (let step = 0; step < 3; step++) {
+                const probs = transitions[state] || { BigProb: 0.5, SmallProb: 0.5 };
+                state = Math.random() < probs.BigProb ? "Big" : "Small";
+            }
+            results[state]++;
+        }
+        
+        const total = results.Big + results.Small;
+        const confidence = Math.abs(results.Big - results.Small) / total * 100;
+        
+        return {
+            side: results.Big > results.Small ? "Big" : "Small",
+            confidence: Math.min(confidence + 5, 85),
+            method: "Monte Carlo",
+            details: `${simulations} sims | Big:${((results.Big/total)*100).toFixed(1)}% Small:${((results.Small/total)*100).toFixed(1)}%`
+        };
+    }
+
+    // Anomaly Detection
+    anomalyDetection(history) {
+        if (history.length < 20) return null;
+        
+        const recent20 = history.slice(0, 20).map(i => getSideFromNumber(i.number));
+        const bigCount = recent20.filter(r => r === "Big").length;
+        const bigRatio = bigCount / 20;
+        
+        if (bigRatio > 0.70) {
+            return {
+                side: "Small",
+                confidence: Math.min(bigRatio * 100 + 10, 85),
+                method: "Anomaly Detection",
+                details: `Big ${bigCount}/20 (${(bigRatio*100).toFixed(0)}%) - Overheated → Reverse`
+            };
+        } else if (bigRatio < 0.30) {
+            return {
+                side: "Big",
+                confidence: Math.min((1 - bigRatio) * 100 + 10, 85),
+                method: "Anomaly Detection",
+                details: `Small ${20-bigCount}/20 (${((1-bigRatio)*100).toFixed(0)}%) - Overheated → Reverse`
+            };
+        }
+        
+        // Streak anomaly
+        let streak = 1;
+        for (let i = 1; i < recent20.length; i++) {
+            if (recent20[i] === recent20[0]) streak++;
+            else break;
+        }
+        
+        if (streak >= 5) {
+            return {
+                side: recent20[0] === "Big" ? "Small" : "Big",
+                confidence: Math.min(70 + streak * 3, 88),
+                method: "Anomaly Detection",
+                details: `${recent20[0]} ${streak} streak detected → Reverse soon`
+            };
+        }
+        
+        return null;
+    }
+
+    // Get local accuracy for a mode
+    getLocalAccuracy(data, mode) {
+        if (!data.brainStats?.modePerformance[mode]) return 0.5;
+        const perf = data.brainStats.modePerformance[mode];
+        const total = perf.wins + perf.losses;
+        return total > 0 ? perf.wins / total : 0.5;
+    }
+
+    // Update weights based on results
+    updateWeights(method, isCorrect) {
+        if (this.weights[method] !== undefined) {
+            if (isCorrect) {
+                this.weights[method] = Math.min(this.maxWeight, this.weights[method] + this.learningRate);
+            } else {
+                this.weights[method] = Math.max(this.minWeight, this.weights[method] - this.learningRate * 0.5);
+            }
+            saveEnsembleWeights(this.weights);
+        }
+    }
+
+    // Main ensemble prediction
+    async predict(data, history, realSide, realNumber) {
+        const predictions = [];
+        
+        // 1. Multi-Timeframe Analysis
+        const tf = this.multiTimeframeAnalysis(history);
+        if (tf) predictions.push({ ...tf, weight: this.weights.timeframe || 1.2 });
+        
+        // 2. Weighted Voting
+        const vote = this.weightedVoting(data, history, realSide);
+        predictions.push({ ...vote, weight: this.weights.voting || 1.5 });
+        
+        // 3. Pattern Matching
+        const memData = smartMemory[data.username || 'global']?.history;
+        if (memData) {
+            const pattern = this.patternMatching(memData, history.slice(0, 20));
+            if (pattern) predictions.push({ ...pattern, weight: this.weights.pattern || 1.3 });
+        }
+        
+        // 4. Monte Carlo
+        const mc = this.monteCarloSimulation(history);
+        if (mc) predictions.push({ ...mc, weight: this.weights.monteCarlo || 1.1 });
+        
+        // 5. Anomaly Detection
+        const anomaly = this.anomalyDetection(history);
+        if (anomaly) predictions.push({ ...anomaly, weight: this.weights.anomaly || 1.4 });
+        
+        // 6. Markov Prediction
+        const histForMarkov = history.slice(0, 30).map(i => getSideFromNumber(i.number));
+        const markov = markovPredict(histForMarkov, 3);
+        if (markov.prediction && markov.confidence >= 0.5) {
+            predictions.push({
+                side: markov.prediction,
+                confidence: markov.confidence * 100,
+                method: "Markov Chain",
+                weight: this.weights.markov || 1.3,
+                details: `Order 3, confidence: ${(markov.confidence*100).toFixed(0)}%`
+            });
+        }
+        
+        // 7. AI Brain
+        const brainDecision = aiBrainDecide(data, history, realSide, realNumber);
+        predictions.push({
+            side: brainDecision.side,
+            confidence: 70,
+            method: "AI Brain",
+            weight: this.weights.ai_brain || 1.4,
+            details: brainDecision.reason
+        });
+        
+        // 8. Hybrid
+        const hybridSide = this.getHybridPrediction(data, realSide);
+        predictions.push({
+            side: hybridSide,
+            confidence: 65,
+            method: "Hybrid",
+            weight: this.weights.hybrid || 1.2,
+            details: "AI + Website combined"
+        });
+        
+        // Ensemble: weighted average calculation
+        let bigScore = 0, smallScore = 0, totalWeight = 0;
+        predictions.forEach(p => {
+            const w = p.weight * (p.confidence / 100);
+            if (p.side === "Big") bigScore += w;
+            else smallScore += w;
+            totalWeight += w;
+        });
+        
+        const finalConfidence = Math.min(Math.abs(bigScore - smallScore) / totalWeight * 100, 92);
+        const finalSide = bigScore > smallScore ? "Big" : "Small";
+        
+        // Agreement count
+        const agreeCount = predictions.filter(p => p.side === finalSide).length;
+        
+        return {
+            side: finalSide,
+            confidence: finalConfidence,
+            method: "Ensemble Ultra",
+            predictions: predictions.map(p => ({
+                method: p.method,
+                side: p.side,
+                confidence: p.confidence.toFixed(0) + '%',
+                weight: p.weight.toFixed(2),
+                details: p.details || ''
+            })),
+            stats: {
+                totalMethods: predictions.length,
+                agreeCount: agreeCount,
+                agreementRate: ((agreeCount / predictions.length) * 100).toFixed(0) + '%',
+                bigScore: bigScore.toFixed(3),
+                smallScore: smallScore.toFixed(3)
+            }
+        };
+    }
+
+    getHybridPrediction(data, realSide) {
+        const aiHistory = data.aiLogs || [];
+        const recentAI = aiHistory.slice(0, 20);
+        const recentLosses = recentAI.filter(log => log.status === "❌").length;
+        const correctCount = recentAI.filter(log => log.status === "✅").length;
+        const aiAccuracy = recentAI.length > 0 ? correctCount / recentAI.length : 0;
+        
+        if (aiAccuracy >= 0.70 && recentLosses === 0) return data.last_pred || "Big";
+        if (recentLosses >= 2 && recentLosses <= 4) return realSide;
+        if (recentLosses >= 5) return data.last_pred || "Big";
+        return data.last_pred || "Big";
+    }
+}
+
+// Initialize ensemble predictor
+const ensemblePredictor = new EnsemblePredictor();
+
+// Kelly Criterion for bet sizing
+function kellyCriterionBetSize(confidence, balance, baseBet) {
+    const b = 0.96; // odds
+    const p = confidence / 100;
+    const q = 1 - p;
+    
+    let kellyFraction = (b * p - q) / b;
+    kellyFraction = Math.max(0, kellyFraction * 0.4); // 40% of Kelly for safety
+    
+    const maxBet = balance * 0.05;
+    const kellyBet = balance * kellyFraction;
+    
+    return Math.min(Math.max(kellyBet, baseBet), maxBet);
 }
 
 // ========== SMART MEMORY ANALYZER ==========
@@ -195,7 +605,7 @@ function updateSmartMemory(chatId, userData, realSide, realNumber, aiSide, aiLog
     }
 
     mem.history.push(entry);
-    if (mem.history.length > 100) mem.history = mem.history.slice(-100);
+    if (mem.history.length > 200) mem.history = mem.history.slice(-200);
 
     const pattern = analyzePatterns(chatId, mem, entry);
     saveSmartMemory(smartMemory);
@@ -206,7 +616,6 @@ function analyzePatterns(chatId, mem, currentEntry) {
     const history = mem.history;
     if (history.length < 10) return null;
 
-    // Pattern 1: AI Recovery - AI ပြန်မှန်ချိန်ရောက်ပြီလား
     if (history.length >= 5) {
         const last5 = history.slice(-5);
         const lossCount = last5.filter(h => !h.aiCorrect).length;
@@ -227,7 +636,6 @@ function analyzePatterns(chatId, mem, currentEntry) {
             }
         }
         
-        // Pattern 2: AI Hot Streak
         const correctCount = last5.filter(h => h.aiCorrect).length;
         if (correctCount >= 4) {
             const pattern = {
@@ -246,7 +654,6 @@ function analyzePatterns(chatId, mem, currentEntry) {
         }
     }
 
-    // Pattern 3: Website Reverse
     if (currentEntry.websiteStreak >= 3) {
         const reverseSide = currentEntry.realSide === "Big" ? "Small" : "Big";
         const pattern = {
@@ -265,7 +672,6 @@ function analyzePatterns(chatId, mem, currentEntry) {
         }
     }
 
-    // Pattern 4: Double Confirm
     if (history.length >= 3) {
         const last3 = history.slice(-3);
         const last3Correct = last3.filter(h => h.aiCorrect).length >= 3;
@@ -296,7 +702,7 @@ function getVipSignalMessage(chatId, userData, pattern, aiPrediction, nextIssue)
     
     let priorityEmoji = '';
     switch (pattern.priority) {
-        case 'VERY_HIGH': priorityEmoji = '🔥🔥🔥';
+        case 'VERY_HIGH': priorityEmoji = '🔥🔥🔥'; break;
         case 'HIGH': priorityEmoji = '🔥🔥'; break;
         case 'MEDIUM': priorityEmoji = '🔥'; break;
         default: priorityEmoji = '💡';
@@ -443,6 +849,7 @@ async function sendBetResultToUser(chatId, userData, betDetail) {
             else if (modeName === 'hybrid') modeName = '🧬 Smart Hybrid';
             else if (modeName === 'ai_brain') modeName = '🧠 AI Brain';
             else if (modeName === 'cautious') modeName = '🧠 Cautious Brain';
+            else if (modeName === 'ensemble') modeName = '🧠 Ensemble Ultra';
             msg += `🤖 *Auto Mode:* ${modeName}\n`;
             msg += `📋 *ထိုးအဆင့်:* ${(userData.currentBetStep || 0) + 1}/${userData.betPlan.length}\n`;
         }
@@ -914,7 +1321,6 @@ async function monitoringLoop(chatId) {
                         const nextIss = await getNextIssue(chatId, data.token);
                         const vipMsg = getVipSignalMessage(chatId, data, memoryResult.pattern, data.last_pred || "Big", nextIss);
                         
-                        // VIP Signal ကို အထူးခလုတ်တွေနဲ့ ပို့မယ်
                         const vipKeyboard = {
                             reply_markup: {
                                 inline_keyboard: [
@@ -965,6 +1371,10 @@ async function monitoringLoop(chatId) {
                                 data.manualBetIssue = null;
                             }
                             if (pendingBet.mode) updateBrainStats(data, pendingBet.mode, true);
+                            // Update ensemble weights
+                            if (pendingBet.mode === 'ensemble' && pendingBet.ensembleMethod) {
+                                ensemblePredictor.updateWeights(pendingBet.ensembleMethod, true);
+                            }
                         } else {
                             pendingBet.status = "❌ LOSS";
                             pendingBet.pnl = -pendingBet.amount;
@@ -987,6 +1397,9 @@ async function monitoringLoop(chatId) {
                                 data.manualBetIssue = null;
                             }
                             if (pendingBet.mode) updateBrainStats(data, pendingBet.mode, false);
+                            if (pendingBet.mode === 'ensemble' && pendingBet.ensembleMethod) {
+                                ensemblePredictor.updateWeights(pendingBet.ensembleMethod, false);
+                            }
                         }
                         betResult = { ...pendingBet, resultNumber: realNumber, resultSide: realSide };
                         saveUserData(chatId, data);
@@ -1032,6 +1445,7 @@ async function monitoringLoop(chatId) {
                         let betSide = null;
                         let betAmount = data.betPlan[data.currentBetStep];
                         let betReason = "";
+                        let ensembleMethod = null;
 
                         if (data.autoMode === 'follow') {
                             betSide = realSide;
@@ -1093,14 +1507,57 @@ async function monitoringLoop(chatId) {
                                     await bot.sendMessage(chatId, `⚠️ Cautious: AI (${data.last_pred}) vs Markov (${markov.prediction}) ကွဲနေ၍ ကျော်ပါမည်`);
                                 }
                             }
+                        } else if (data.autoMode === 'ensemble') {
+                            // ========== ENSEMBLE ULTRA MODE ==========
+                            const ensembleResult = await ensemblePredictor.predict(data, history, realSide, realNumber);
+                            betSide = ensembleResult.side;
+                            
+                            // Kelly Criterion bet sizing
+                            const baseBet = data.betPlan[data.currentBetStep];
+                            betAmount = kellyCriterionBetSize(ensembleResult.confidence, data.currentBalance || baseBet * 10, baseBet);
+                            betAmount = Math.round(betAmount);
+                            
+                            // Store ensemble method for weight updates
+                            ensembleMethod = ensembleResult.predictions[0]?.method || 'ensemble';
+                            
+                            betReason = `🧠 *ENSEMBLE ULTRA*\n`;
+                            betReason += `━━━━━━━━━━━━━━━━\n`;
+                            betReason += `🎯 ဆုံးဖြတ်ချက်: ${ensembleResult.side === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+                            betReason += `📈 ယုံကြည်မှု: ${ensembleResult.confidence.toFixed(1)}%\n`;
+                            betReason += `🤝 သဘောတူမှု: ${ensembleResult.stats.agreeCount}/${ensembleResult.stats.totalMethods} (${ensembleResult.stats.agreementRate})\n`;
+                            betReason += `💰 Kelly Bet: ${betAmount} MMK\n`;
+                            betReason += `━━━━━━━━━━━━━━━━\n`;
+                            betReason += `📊 *နည်းလမ်းများ:*\n`;
+                            ensembleResult.predictions.forEach(p => {
+                                const agreeEmoji = p.side === ensembleResult.side ? "✅" : "❌";
+                                betReason += `${agreeEmoji} ${p.method}: ${p.side} (${p.confidence}) [w:${p.weight}]\n`;
+                            });
+                            
+                            // Send ensemble analysis
+                            await bot.sendMessage(chatId, betReason, { parse_mode: "Markdown" });
+                            betReason = `Ensemble Ultra: ${ensembleResult.side} (${ensembleResult.confidence.toFixed(0)}%) [${ensembleResult.stats.agreeCount}/${ensembleResult.stats.totalMethods} agree]`;
                         }
 
                         if (betSide) {
                             await checkBalance(chatId);
                             data = getUserData(chatId);
-                            await bot.sendMessage(chatId, `⏰ ပွဲစဉ် ${nextIssue.slice(-5)} အတွက် ၅ စက္ကန့်စောင့်ပြီး ထိုးပါမည်...\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\n📝 ${betReason}`);
+                            
+                            // Only show waiting message for non-ensemble modes
+                            if (data.autoMode !== 'ensemble') {
+                                await bot.sendMessage(chatId, `⏰ ပွဲစဉ် ${nextIssue.slice(-5)} အတွက် ၅ စက္ကန့်စောင့်ပြီး ထိုးပါမည်...\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\n📝 ${betReason}`);
+                            }
+                            
                             const betWindowReady = await waitForBetWindow(chatId, nextIssue, 10000);
-                            await placeBetNow(chatId, betSide, betAmount, nextIssue, data.currentBetStep, true, betReason);
+                            const success = await placeBetNow(chatId, betSide, betAmount, nextIssue, data.currentBetStep, true, betReason);
+                            
+                            // Store ensemble method for weight update
+                            if (success && ensembleMethod) {
+                                const lastBet = data.betHistory[0];
+                                if (lastBet) {
+                                    lastBet.ensembleMethod = ensembleMethod;
+                                    saveUserData(chatId, data);
+                                }
+                            }
                         }
                     }
 
@@ -1116,6 +1573,7 @@ async function monitoringLoop(chatId) {
                         else if (data.autoMode === 'hybrid') modeText = "🧬 Smart Hybrid";
                         else if (data.autoMode === 'ai_brain') modeText = "🧠 AI Brain";
                         else if (data.autoMode === 'cautious') modeText = "🧠 Cautious Brain";
+                        else if (data.autoMode === 'ensemble') modeText = "🧠 Ensemble Ultra";
                     }
 
                     let statusMsg = `💥 *${nickname} - VIP SIGNAL* 💥\n`;
@@ -1131,8 +1589,11 @@ async function monitoringLoop(chatId) {
                     const lossStreakShort = formatLossStreakShort(data.aiLogs);
                     statusMsg += `📉 ${lossStreakShort}\n`;
 
-                    if (data.autoMode === 'ai_brain' && data.brainStats) {
+                    if ((data.autoMode === 'ai_brain' || data.autoMode === 'ensemble') && data.brainStats) {
                         statusMsg += `🧠 Best Mode: ${data.brainStats.currentBestMode || 'N/A'}\n`;
+                    }
+                    if (data.autoMode === 'ensemble') {
+                        statusMsg += `📊 Ensemble Weights: V=${ensemblePredictor.weights.voting?.toFixed(2)||'1.5'} T=${ensemblePredictor.weights.timeframe?.toFixed(2)||'1.2'} P=${ensemblePredictor.weights.pattern?.toFixed(2)||'1.3'}\n`;
                     }
                     statusMsg += `━━━━━━━━━━━━━━━━\n`;
                     statusMsg += `🚀 Next: ${nextIssue.slice(-5)} (${mmTime})\n`;
@@ -1179,7 +1640,7 @@ const mainMenu = {
             ["📉 Check AI Loss Streak", "🌍 Global Dashboard"],
             ["👤 Set Nickname", "🧠 Brain Stats"],
             ["🎯 VIP Signal On/Off", "📊 Memory Stats"],
-            ["🚪 Logout"]
+            ["🧬 Ensemble Weights", "🚪 Logout"]
         ],
         resize_keyboard: true
     }
@@ -1205,6 +1666,7 @@ const autoModeMenu = {
             ["🧬 Smart Hybrid"],
             ["🧠 AI Brain (Master)"],
             ["🧠 Cautious Brain (Markov)"],
+            ["🧠 Ensemble Ultra (8-in-1)"],
             ["🔙 Main Menu"]
         ],
         resize_keyboard: true
@@ -1229,6 +1691,7 @@ bot.on('message', async (msg) => {
         data.totalProfit = 0;
         data.currentBalance = 0;
         data.vipSignalsEnabled = true;
+        data.ensembleMode = true;
         data.brainStats = {
             totalPredictions: 0,
             correctPredictions: 0,
@@ -1238,7 +1701,8 @@ bot.on('message', async (msg) => {
                 ai_correction: { wins: 0, losses: 0 },
                 emerdlist: { wins: 0, losses: 0 },
                 hybrid: { wins: 0, losses: 0 },
-                cautious: { wins: 0, losses: 0 }
+                cautious: { wins: 0, losses: 0 },
+                ensemble: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -1250,17 +1714,34 @@ bot.on('message', async (msg) => {
         delete data.username;
         saveUserData(chatId, data);
 
-        let welcomeMsg = `🎯 *WinGo Sniper Pro v3.2* 🎯\n`;
+        let welcomeMsg = `🎯 *WinGo Sniper Pro v4.0* 🎯\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
-        welcomeMsg += `⏰ 30 Sec Game - Advanced AI\n`;
-        welcomeMsg += `🧠 *Mode 7 မျိုး:*\n`;
+        welcomeMsg += `⏰ 30 Sec Game - Ensemble AI\n`;
+        welcomeMsg += `🧠 *Mode 8 မျိုး:*\n`;
         welcomeMsg += `  🔄 Follow\n  🔃 Reverse\n  🤖 AI Correction\n  🧠 GetEmerdList\n  🧬 Smart Hybrid\n  🧠 AI Brain\n  🧠 Cautious Brain (Markov)\n`;
-        welcomeMsg += `🎯 *VIP Signal System* - တကွက်ကောင်း အချက်ပြစနစ်\n`;
+        welcomeMsg += `  🧠 *Ensemble Ultra (8-in-1)* ← အသစ်!\n`;
+        welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
+        welcomeMsg += `🎯 *VIP Signal System* - Pattern Detection\n`;
+        welcomeMsg += `📊 *Kelly Criterion* - Smart Bet Sizing\n`;
+        welcomeMsg += `🧬 *Ensemble AI* - 8 Methods Combined\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n\n`;
         welcomeMsg += `ဖုန်းနံပါတ်ပေးပါ (သို့) Global Dashboard ကြည့်ပါ:`;
 
         await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown" });
         return bot.sendMessage(chatId, "🔐 ဆက်လက်အသုံးပြုရန် ဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+    }
+
+    if (text === "🧬 Ensemble Weights") {
+        let msg = `🧬 *Ensemble AI Weights*\n━━━━━━━━━━━━━━━━\n`;
+        msg += `📊 နည်းလမ်းတစ်ခုချင်းစီရဲ့ အလေးချိန်:\n\n`;
+        Object.entries(ensembleWeights).forEach(([method, weight]) => {
+            const bar = '█'.repeat(Math.round(weight * 5));
+            msg += `• ${method}: ${weight.toFixed(2)} ${bar}\n`;
+        });
+        msg += `\n💡 Weights တွေက မှန်/မှားပေါ်မူတည်ပြီး အလိုအလျောက်ပြောင်းပါတယ်။\n`;
+        msg += `📈 Range: 0.50 - 2.50\n`;
+        msg += `🔄 Learning Rate: 0.05`;
+        return bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     }
 
     if (text === "🎯 VIP Signal On/Off") {
@@ -1294,7 +1775,6 @@ bot.on('message', async (msg) => {
             });
         }
         
-        // Last 5 memory entries
         const last5 = mem.history.slice(-5).reverse();
         msg += `━━━━━━━━━━━━━━━━\n📝 *Last 5 Memory:*\n`;
         last5.forEach((h, i) => {
@@ -1454,6 +1934,29 @@ bot.on('message', async (msg) => {
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ *Cautious Brain (Markov) Mode Started!*\n\n🧠 Markov Chain (order 3) ဖြင့် Website Pattern ဖမ်းမည်\n🤖 AI ခန့်မှန်းချက်နဲ့ နှိုင်းယှဉ်မည်\n⚠️ Confidence ≥ 65% + AI/Markov သဘောတူမှထိုးမည်\n📉 AI အမှားဆက် အမြင့်ဆုံးရောက်ရင် Markov အတိုင်းဆက်ထိုးမည်\n💰 Bet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu });
     }
+    if (text === "🧠 Ensemble Ultra (8-in-1)") {
+        data.autoRunning = true; data.autoMode = 'ensemble'; data.currentBetStep = 0; data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false; data.sessionWins = 0;
+        saveUserData(chatId, data);
+        
+        let ensembleMsg = `✅ *ENSEMBLE ULTRA MODE ACTIVATED!*\n`;
+        ensembleMsg += `━━━━━━━━━━━━━━━━\n`;
+        ensembleMsg += `🧠 *နည်းလမ်း ၈ ခုပေါင်းစပ်ထားသော AI*\n\n`;
+        ensembleMsg += `📊 *ပါဝင်သော နည်းလမ်းများ:*\n`;
+        ensembleMsg += `  1. Multi-Timeframe Analysis\n`;
+        ensembleMsg += `  2. Weighted Voting (7 modes)\n`;
+        ensembleMsg += `  3. Pattern Matching\n`;
+        ensembleMsg += `  4. Monte Carlo Simulation\n`;
+        ensembleMsg += `  5. Anomaly Detection\n`;
+        ensembleMsg += `  6. Markov Chain\n`;
+        ensembleMsg += `  7. AI Brain\n`;
+        ensembleMsg += `  8. Smart Hybrid\n\n`;
+        ensembleMsg += `💰 *Kelly Criterion* - ယုံကြည်မှုအလိုက် ထိုးကြေးပြောင်း\n`;
+        ensembleMsg += `🔄 *Auto Weight Update* - မှန်/မှားပေါ်မူတည်၍ အလေးချိန်ပြောင်း\n`;
+        ensembleMsg += `━━━━━━━━━━━━━━━━\n`;
+        ensembleMsg += `Stop Limit: ${data.stopLimit}\nBet Plan: ${data.betPlan.join(' → ')}`;
+        
+        await bot.sendMessage(chatId, ensembleMsg, { parse_mode: "Markdown", ...mainMenu });
+    }
 
     if (text === "🛑 Stop Auto") {
         data.autoRunning = false; data.autoMode = null; data.sessionWins = 0; data.currentBetStep = 0;
@@ -1488,6 +1991,9 @@ bot.on('message', async (msg) => {
         if (data.consecutiveLosses > 0) status += `⚠️ လက်ရှိအမှားဆက်: ${data.consecutiveLosses} ပွဲ\n`;
         if (data.brainStats?.currentBestMode) status += `🧠 Best Mode: ${data.brainStats.currentBestMode}\n`;
         status += `🎯 VIP Signals: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}\n`;
+        if (data.autoMode === 'ensemble') {
+            status += `📊 Ensemble Weights: V=${ensemblePredictor.weights.voting?.toFixed(2)||'1.5'} P=${ensemblePredictor.weights.pattern?.toFixed(2)||'1.3'}\n`;
+        }
         return bot.sendMessage(chatId, status);
     }
 
@@ -1559,7 +2065,7 @@ bot.on('message', async (msg) => {
             await checkBalance(chatId);
             data = getUserData(chatId);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, `✅ Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\nSignal များ User သို့သာ ပို့ပါမည်။\n🎯 VIP Signal System: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}`, mainMenu);
+            await bot.sendMessage(chatId, `✅ Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\nSignal များ User သို့သာ ပို့ပါမည်။\n🎯 VIP Signal System: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}\n🧬 Ensemble Ultra: Available in Auto Mode`, mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed! နံပါတ်နှင့် Password ပြန်စစ်ပါ။");
             delete data.tempPhone;
@@ -1609,13 +2115,11 @@ bot.on('callback_query', async (query) => {
 // ========== HELP COMMAND ==========
 bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id.toString();
-    let helpText = `📖 *WinGo Pro Bot v3.2 - Smart Memory*\n━━━━━━━━━━━━━━━━\n\n🤖 *Auto Modes (7 Modes)*\n`;
-    helpText += `• 🔄 Follow - နောက်ဆုံးပွဲအတိုင်း\n• 🔃 Reverse - ပြောင်းပြန်ထိုး\n• 🤖 AI Correction - AI မှားချိန်မှထိုး\n• 🧠 GetEmerdList - Hot/Cold+Trend\n• 🧬 Smart Hybrid - AI+Website ပေါင်း\n• 🧠 AI Brain - Master Decision\n• 🧠 Cautious Brain - Markov Chain + AI နှိုင်းယှဉ်\n`;
-    helpText += `\n🎯 *VIP Signal System (အသစ်)*\n`;
-    helpText += `• AI မှန်မှား + Website ထွက်ကို မှတ်ဉာဏ်ထဲသိမ်း\n`;
-    helpText += `• Pattern ၄ မျိုး ဖမ်းပြီး တကွက်ကောင်းပို့\n`;
-    helpText += `• Confidence 65-90% ရှိမှ ပို့မည်\n`;
-    helpText += `• Manual Bet နဲ့သာ ထိုးရန် အကြံပေး\n`;
+    let helpText = `📖 *WinGo Pro Bot v4.0 - Ensemble Ultra*\n━━━━━━━━━━━━━━━━\n\n🤖 *Auto Modes (8 Modes)*\n`;
+    helpText += `• 🔄 Follow - နောက်ဆုံးပွဲအတိုင်း\n• 🔃 Reverse - ပြောင်းပြန်ထိုး\n• 🤖 AI Correction - AI မှားချိန်မှထိုး\n• 🧠 GetEmerdList - Hot/Cold+Trend\n• 🧬 Smart Hybrid - AI+Website ပေါင်း\n• 🧠 AI Brain - Master Decision\n• 🧠 Cautious Brain - Markov Chain + AI\n`;
+    helpText += `• 🧠 *Ensemble Ultra* - 8 Methods Combined!\n`;
+    helpText += `\n🧬 *Ensemble Ultra Features:*\n`;
+    helpText += `• Multi-Timeframe Analysis\n• Weighted Voting (7 modes)\n• Pattern Matching Engine\n• Monte Carlo Simulation\n• Anomaly Detection\n• Markov Chain Prediction\n• AI Brain + Hybrid\n• Kelly Criterion Bet Sizing\n• Auto Weight Adjustment\n`;
     await bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
 });
 
@@ -1629,6 +2133,7 @@ function getModeEmoji(mode) {
         case 'hybrid': return "🧬";
         case 'ai_brain': return "🧠";
         case 'cautious': return "🧠";
+        case 'ensemble': return "🧠";
         default: return "⚪️";
     }
 }
@@ -1679,12 +2184,13 @@ http.createServer((req, res) => {
         });
     } else {
         res.writeHead(200);
-        res.end('WinGo Pro Bot v3.2 - Smart Memory Analyzer');
+        res.end('WinGo Pro Bot v4.0 - Ensemble Ultra AI');
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
-    console.log(`🧠 Smart Memory Analyzer: ACTIVE`);
+    console.log(`🧬 Ensemble Ultra AI: ACTIVE`);
     console.log(`🎯 VIP Signal System: READY`);
+    console.log(`📊 Kelly Criterion: ENABLED`);
 });
 
-console.log("✅ WinGo Pro Bot v3.2 - Smart Memory Analyzer + VIP Signal System");
+console.log("✅ WinGo Pro Bot v4.0 - Ensemble Ultra AI (8-in-1)");
