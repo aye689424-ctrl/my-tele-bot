@@ -72,9 +72,27 @@ function saveSmartMemory(data) {
 function loadEnsembleWeights() {
     try {
         if (fs.existsSync(ENSEMBLE_FILE)) {
-            return JSON.parse(fs.readFileSync(ENSEMBLE_FILE, 'utf8'));
+            const data = JSON.parse(fs.readFileSync(ENSEMBLE_FILE, 'utf8'));
+            const defaultWeights = {
+                timeframe: 1.2,
+                voting: 1.5,
+                pattern: 1.3,
+                monteCarlo: 1.1,
+                anomaly: 1.4,
+                markov: 1.3,
+                ai_brain: 1.4,
+                hybrid: 1.2
+            };
+            Object.keys(defaultWeights).forEach(key => {
+                if (data[key] === undefined || data[key] === null) {
+                    data[key] = defaultWeights[key];
+                }
+            });
+            return data;
         }
-    } catch (e) {}
+    } catch (e) {
+        console.error('Load ensemble weights error:', e.message);
+    }
     return {
         timeframe: 1.2,
         voting: 1.5,
@@ -90,7 +108,9 @@ function loadEnsembleWeights() {
 function saveEnsembleWeights(data) {
     try {
         fs.writeFileSync(ENSEMBLE_FILE, JSON.stringify(data, null, 2));
-    } catch (e) {}
+    } catch (e) {
+        console.error('Save ensemble weights error:', e.message);
+    }
 }
 
 let allUsers = loadAllData();
@@ -199,12 +219,7 @@ function kellyCriterionBetSize(confidence, balance, baseBet) {
     const maxBet = balance * 0.05;
     const kellyBet = balance * kellyFraction;
     
-    // အနည်းဆုံး baseBet (Bet Plan ရဲ့ လက်ရှိအဆင့်) အတိုင်းထိုးမယ်
-    // Kelly က baseBet ထက်နည်းရင် baseBet အတိုင်းပဲထိုး
-    // Kelly က baseBet ထက်များရင် Kelly အတိုင်းထိုး (ဒါပေမယ့် maxBet ထက်မကျော်ရ)
     const finalBet = Math.min(Math.max(kellyBet, baseBet), maxBet);
-    
-    // အနည်းဆုံး 10 ကျပ် ဖြစ်အောင်
     return Math.max(Math.round(finalBet), 10);
 }
 
@@ -424,11 +439,24 @@ class EnsemblePredictor {
     }
 
     updateWeights(method, isCorrect) {
-        if (this.weights[method] !== undefined) {
+        const methodKeyMap = {
+            'Multi-Timeframe': 'timeframe',
+            'Weighted Voting': 'voting',
+            'Pattern Matching': 'pattern',
+            'Monte Carlo': 'monteCarlo',
+            'Anomaly Detection': 'anomaly',
+            'Markov Chain': 'markov',
+            'AI Brain': 'ai_brain',
+            'Hybrid': 'hybrid'
+        };
+        
+        const key = methodKeyMap[method] || method;
+        
+        if (this.weights[key] !== undefined) {
             if (isCorrect) {
-                this.weights[method] = Math.min(this.maxWeight, this.weights[method] + this.learningRate);
+                this.weights[key] = Math.min(this.maxWeight, this.weights[key] + this.learningRate);
             } else {
-                this.weights[method] = Math.max(this.minWeight, this.weights[method] - this.learningRate * 0.5);
+                this.weights[key] = Math.max(this.minWeight, this.weights[key] - this.learningRate * 0.5);
             }
             saveEnsembleWeights(this.weights);
         }
@@ -450,15 +478,12 @@ class EnsemblePredictor {
     async predict(data, history, realSide, realNumber) {
         const predictions = [];
         
-        // 1. Multi-Timeframe Analysis
         const tf = this.multiTimeframeAnalysis(history);
         if (tf) predictions.push({ ...tf, weight: this.weights.timeframe || 1.2 });
         
-        // 2. Weighted Voting
         const vote = this.weightedVoting(data, history, realSide);
         predictions.push({ ...vote, weight: this.weights.voting || 1.5 });
         
-        // 3. Pattern Matching
         const chatId = Object.keys(allUsers).find(k => allUsers[k] === data);
         const memHistory = chatId && smartMemory[chatId] ? smartMemory[chatId].history : null;
         if (memHistory && memHistory.length >= 10) {
@@ -466,15 +491,12 @@ class EnsemblePredictor {
             if (pattern) predictions.push({ ...pattern, weight: this.weights.pattern || 1.3 });
         }
         
-        // 4. Monte Carlo
         const mc = this.monteCarloSimulation(history);
         if (mc) predictions.push({ ...mc, weight: this.weights.monteCarlo || 1.1 });
         
-        // 5. Anomaly Detection
         const anomaly = this.anomalyDetection(history);
         if (anomaly) predictions.push({ ...anomaly, weight: this.weights.anomaly || 1.4 });
         
-        // 6. Markov Prediction
         const histForMarkov = history.slice(0, 30).map(i => getSideFromNumber(i.number));
         const markov = markovPredict(histForMarkov, 3);
         if (markov.prediction && markov.confidence >= 0.5) {
@@ -487,7 +509,6 @@ class EnsemblePredictor {
             });
         }
         
-        // 7. AI Brain
         const brainDecision = aiBrainDecide(data, history, realSide, realNumber);
         predictions.push({
             side: brainDecision.side,
@@ -497,7 +518,6 @@ class EnsemblePredictor {
             details: brainDecision.reason
         });
         
-        // 8. Hybrid
         const hybridSide = this.getHybridPrediction(data, realSide);
         predictions.push({
             side: hybridSide,
@@ -507,7 +527,6 @@ class EnsemblePredictor {
             details: "AI + Website combined"
         });
         
-        // Ensemble: weighted average calculation
         let bigScore = 0, smallScore = 0, totalWeight = 0;
         predictions.forEach(p => {
             const w = p.weight * (p.confidence / 100);
@@ -516,7 +535,12 @@ class EnsemblePredictor {
             totalWeight += w;
         });
         
-        const finalConfidence = Math.min(Math.abs(bigScore - smallScore) / totalWeight * 100, 92);
+        let finalConfidence = 50;
+        if (totalWeight > 0) {
+            finalConfidence = Math.min(Math.abs(bigScore - smallScore) / totalWeight * 100, 92);
+        }
+        if (finalConfidence < 1) finalConfidence = 50;
+        
         const finalSide = bigScore > smallScore ? "Big" : "Small";
         const agreeCount = predictions.filter(p => p.side === finalSide).length;
         
@@ -1668,13 +1692,36 @@ bot.on('message', async (msg) => {
     }
 
     if (text === "🧬 Ensemble Weights") {
-        let msg = `🧬 *Ensemble AI Weights*\n━━━━━━━━━━━━━━━━\n📊 နည်းလမ်းတစ်ခုချင်းစီရဲ့ အလေးချိန်:\n\n`;
-        Object.entries(ensembleWeights).forEach(([method, weight]) => {
-            const bar = '█'.repeat(Math.round(weight * 5));
-            msg += `• ${method}: ${weight.toFixed(2)} ${bar}\n`;
-        });
-        msg += `\n💡 Weights တွေက မှန်/မှားပေါ်မူတည်ပြီး အလိုအလျောက်ပြောင်းပါတယ်။\n📈 Range: 0.50 - 2.50\n🔄 Learning Rate: 0.05`;
-        return bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        try {
+            const weights = ensemblePredictor.weights || loadEnsembleWeights();
+            
+            let msg = `🧬 *Ensemble AI Weights*\n━━━━━━━━━━━━━━━━\n📊 နည်းလမ်းတစ်ခုချင်းစီရဲ့ အလေးချိန်:\n\n`;
+            
+            const methods = [
+                { key: 'timeframe', name: 'Multi-Timeframe' },
+                { key: 'voting', name: 'Weighted Voting' },
+                { key: 'pattern', name: 'Pattern Matching' },
+                { key: 'monteCarlo', name: 'Monte Carlo' },
+                { key: 'anomaly', name: 'Anomaly Detection' },
+                { key: 'markov', name: 'Markov Chain' },
+                { key: 'ai_brain', name: 'AI Brain' },
+                { key: 'hybrid', name: 'Smart Hybrid' }
+            ];
+            
+            methods.forEach(m => {
+                const weight = weights[m.key] || 1.0;
+                const bar = '█'.repeat(Math.max(1, Math.round(weight * 5)));
+                msg += `• ${m.name}: ${weight.toFixed(2)} ${bar}\n`;
+            });
+            
+            msg += `\n💡 Weights တွေက မှန်/မှားပေါ်မူတည်ပြီး အလိုအလျောက်ပြောင်းပါတယ်။`;
+            
+            await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        } catch (e) {
+            console.error('Ensemble Weights error:', e);
+            await bot.sendMessage(chatId, "❌ ခေတ္တကြည့်၍မရပါ။ နောက်မှ ပြန်စမ်းပါ။");
+        }
+        return;
     }
 
     if (text === "🎯 VIP Signal On/Off") {
@@ -1895,11 +1942,11 @@ bot.on('message', async (msg) => {
     }
     if (text === "🛑 Set Stop Limit") {
         data.settingMode = "stoplimit"; saveUserData(chatId, data);
-        return bot.sendMessage(chatId, `🏆 Stop Limit ထည့်ပါ\n\n�က်ရှိ: ${data.stopLimit} ပွဲ`);
+        return bot.sendMessage(chatId, `🏆 Stop Limit ထည့်ပါ\n\nလက်ရှိ: ${data.stopLimit} ပွဲ`);
     }
     if (text === "⚠️ Set Loss Start") {
         data.settingMode = "lossstart"; saveUserData(chatId, data);
-        return bot.sendMessage(chatId, `⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\n�က်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`);
+        return bot.sendMessage(chatId, `⚠️ Loss Start Limit ထည့်ပါ (၁-၁၀)\n\nလက်ရှိ: ${data.lossStartLimit} ပွဲဆက်မှား`);
     }
     if (text === "🔙 Main Menu") {
         delete data.settingMode; saveUserData(chatId, data);
@@ -2106,13 +2153,14 @@ http.createServer((req, res) => {
         });
     } else {
         res.writeHead(200);
-        res.end('WinGo Pro Bot v4.0 - Ensemble Ultra AI (Fixed Kelly)');
+        res.end('WinGo Pro Bot v4.0 - Ensemble Ultra AI (Fixed)');
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🧬 Ensemble Ultra AI: ACTIVE`);
     console.log(`🎯 VIP Signal System: READY`);
     console.log(`📊 Kelly Criterion: ENABLED (Min: Bet Plan, Min: 10 MMK)`);
+    console.log(`🔧 Ensemble Weights Bug: FIXED`);
 });
 
-console.log("✅ WinGo Pro Bot v4.0 - Ensemble Ultra AI (Kelly Fixed - Min 10 MMK)");
+console.log("✅ WinGo Pro Bot v4.0 - All Bugs Fixed");
