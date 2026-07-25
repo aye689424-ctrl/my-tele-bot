@@ -980,24 +980,31 @@ function formatLossStreakShort(aiLogs) {
 }
 
 // ========== LOSS STREAK TIMING ANALYZER ==========
-function analyzeLossStreakWithTiming(aiLogs, betHistory) {
+function analyzeLossStreakWithTiming(aiLogs) {
     if (!aiLogs || aiLogs.length < 2) {
-        return { streaks: [], summary: "📊 AI မှတ်တမ်းမရှိသေးပါ (အနည်းဆုံး ၂ ပွဲလိုအပ်)" };
+        return { streaks: [], summary: "📊 AI မှတ်တမ်းမရှိသေးပါ" };
     }
 
     const streaks = [];
     let currentLossStreak = [];
     let currentStreakStart = null;
     let currentStreakEnd = null;
+    let totalWins = 0;
+    let totalLosses = 0;
+    let previousStreakEndIssue = null;
+    let previousStreakEndTime = null;
+    let gapCount = 0;
+    let gapTime = 'N/A';
     
-    // ပွဲအချိန်များကို betHistory ထဲမှ ယူ
-    const betMap = {};
-    betHistory?.forEach(b => {
-        betMap[b.issue] = b.timestamp || b.time || new Date().toISOString();
-    });
-
-    // AI မှတ်တမ်းကို ပြန်လှန် (အဟောင်းဆုံးက အစ)
     const logs = [...aiLogs].reverse();
+    
+    logs.forEach(l => {
+        if (l.status === "✅") totalWins++;
+        else if (l.status === "❌") totalLosses++;
+    });
+    
+    let tempWins = 0;
+    let streakIndex = 0;
     
     for (let i = 0; i < logs.length; i++) {
         const log = logs[i];
@@ -1005,28 +1012,78 @@ function analyzeLossStreakWithTiming(aiLogs, betHistory) {
         
         if (isLoss) {
             if (currentLossStreak.length === 0) {
-                currentStreakStart = log.issue;
+                currentStreakStart = log;
+                if (previousStreakEndIssue && previousStreakEndTime && log.timestamp) {
+                    const startNum = parseInt(log.issue);
+                    const prevEndNum = parseInt(previousStreakEndIssue);
+                    gapCount = startNum - prevEndNum - 1;
+                    if (gapCount < 0) gapCount = 0;
+                    
+                    try {
+                        const prevEnd = new Date(previousStreakEndTime);
+                        const currStart = new Date(log.timestamp);
+                        const diffMs = currStart - prevEnd;
+                        if (diffMs > 0) {
+                            const diffMin = Math.floor(diffMs / 60000);
+                            const diffSec = Math.floor((diffMs % 60000) / 1000);
+                            gapTime = `${diffMin}မိနစ် ${diffSec}စက္ကန့်`;
+                        } else {
+                            gapTime = 'N/A';
+                        }
+                    } catch (e) {
+                        gapTime = 'N/A';
+                    }
+                } else {
+                    gapCount = 0;
+                    gapTime = 'N/A';
+                }
+                tempWins = 0;
             }
             currentLossStreak.push(log);
-            currentStreakEnd = log.issue;
+            currentStreakEnd = log;
         } else {
+            tempWins++;
             if (currentLossStreak.length >= 2) {
-                // အမှားဆက် ပြီးဆုံး
-                const streakData = {
+                previousStreakEndIssue = currentStreakEnd?.issue;
+                previousStreakEndTime = currentStreakEnd?.timestamp;
+                
+                let streakTime = 'N/A';
+                const startTime = currentStreakStart?.timestamp;
+                const endTime = currentStreakEnd?.timestamp;
+                if (startTime && endTime && startTime !== 'N/A' && endTime !== 'N/A') {
+                    try {
+                        const startDate = new Date(startTime);
+                        const endDate = new Date(endTime);
+                        const diffMs = endDate - startDate;
+                        if (diffMs > 0) {
+                            const diffMin = Math.floor(diffMs / 60000);
+                            const diffSec = Math.floor((diffMs % 60000) / 1000);
+                            streakTime = `${diffMin}မိနစ် ${diffSec}စက္ကန့်`;
+                        }
+                    } catch (e) {
+                        streakTime = 'N/A';
+                    }
+                }
+                
+                streaks.push({
+                    streakIndex: streakIndex + 1,
                     streakCount: currentLossStreak.length,
-                    startIssue: currentStreakStart,
-                    endIssue: currentStreakEnd,
-                    startTime: betMap[currentStreakStart] || currentLossStreak[0]?.timestamp || 'N/A',
-                    endTime: betMap[currentStreakEnd] || currentLossStreak[currentLossStreak.length - 1]?.timestamp || 'N/A',
-                    issues: currentLossStreak.map(l => l.issue),
+                    startIssue: currentStreakStart?.issue || 'N/A',
+                    endIssue: currentStreakEnd?.issue || 'N/A',
+                    streakTime: streakTime,
+                    gapToNextLoss: gapCount,
+                    gapTime: gapTime,
+                    gapWins: tempWins,
                     details: currentLossStreak.map(l => ({
                         issue: l.issue,
                         prediction: l.prediction,
                         result: l.result,
-                        number: l.number
+                        number: l.number,
+                        status: l.status,
+                        time: l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : 'N/A'
                     }))
-                };
-                streaks.push(streakData);
+                });
+                streakIndex++;
             }
             currentLossStreak = [];
             currentStreakStart = null;
@@ -1034,85 +1091,148 @@ function analyzeLossStreakWithTiming(aiLogs, betHistory) {
         }
     }
     
-    // နောက်ဆုံး အမှားဆက် (လက်ရှိဖြစ်နေဆဲ)
     if (currentLossStreak.length >= 2) {
-        const streakData = {
+        let gapToNextLoss = 'ဆက်လက်ဖြစ်နေဆဲ';
+        let gapTimeText = 'ဆက်လက်ဖြစ်နေဆဲ';
+        
+        if (previousStreakEndIssue && previousStreakEndTime && currentStreakStart?.timestamp) {
+            const startNum = parseInt(currentStreakStart.issue);
+            const prevEndNum = parseInt(previousStreakEndIssue);
+            const gap = startNum - prevEndNum - 1;
+            gapToNextLoss = gap > 0 ? gap : 0;
+            
+            try {
+                const prevEnd = new Date(previousStreakEndTime);
+                const currStart = new Date(currentStreakStart.timestamp);
+                const diffMs = currStart - prevEnd;
+                if (diffMs > 0) {
+                    const diffMin = Math.floor(diffMs / 60000);
+                    const diffSec = Math.floor((diffMs % 60000) / 1000);
+                    gapTimeText = `${diffMin}မိနစ် ${diffSec}စက္ကန့်`;
+                }
+            } catch (e) {
+                gapTimeText = 'N/A';
+            }
+        }
+        
+        let streakTime = 'N/A';
+        const startTime = currentStreakStart?.timestamp;
+        if (startTime && startTime !== 'N/A') {
+            try {
+                const startDate = new Date(startTime);
+                const now = new Date();
+                const diffMs = now - startDate;
+                if (diffMs > 0) {
+                    const diffMin = Math.floor(diffMs / 60000);
+                    const diffSec = Math.floor((diffMs % 60000) / 1000);
+                    streakTime = `${diffMin}မိနစ် ${diffSec}စက္ကန့် (ဆက်လက်ဖြစ်နေဆဲ)`;
+                }
+            } catch (e) {
+                streakTime = 'N/A';
+            }
+        }
+        
+        streaks.push({
+            streakIndex: streakIndex + 1,
             streakCount: currentLossStreak.length,
-            startIssue: currentStreakStart,
-            endIssue: currentStreakEnd,
-            startTime: betMap[currentStreakStart] || currentLossStreak[0]?.timestamp || 'N/A',
-            endTime: '🔄 ဆက်လက်ဖြစ်ပေါ်နေဆဲ',
-            issues: currentLossStreak.map(l => l.issue),
+            startIssue: currentStreakStart?.issue || 'N/A',
+            endIssue: 'ဆက်လက်ဖြစ်နေဆဲ',
+            streakTime: streakTime,
+            gapToNextLoss: gapToNextLoss,
+            gapTime: gapTimeText,
+            gapWins: 'ဆက်လက်ဖြစ်နေဆဲ',
             details: currentLossStreak.map(l => ({
                 issue: l.issue,
                 prediction: l.prediction,
                 result: l.result,
-                number: l.number
+                number: l.number,
+                status: l.status,
+                time: l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : 'N/A'
             })),
             isOngoing: true
-        };
-        streaks.push(streakData);
+        });
     }
 
-    // Save to persistent storage
     lossStreakData.streaks = streaks;
     lossStreakData.lastAnalysis = new Date().toISOString();
+    lossStreakData.totalWins = totalWins;
+    lossStreakData.totalLosses = totalLosses;
     saveLossStreakData(lossStreakData);
 
-    return { streaks, summary: `📊 အမှားဆက် (၂ ပွဲအထက်) စုစုပေါင်း ${streaks.length} ကြိမ် တွေ့ရှိ` };
+    return { 
+        streaks, 
+        totalWins, 
+        totalLosses,
+        summary: `📊 အမှန်: ${totalWins} ပွဲ | အမှား: ${totalLosses} ပွဲ | အမှားဆက် ${streaks.length} ကြိမ်`
+    };
 }
 
-function formatLossStreakTiming(streaks) {
+function formatLossStreakTiming(streaks, totalWins = 0, totalLosses = 0) {
     if (!streaks || streaks.length === 0) {
         return "📊 အမှားဆက် (၂ ပွဲအထက်) မှတ်တမ်း မရှိသေးပါ";
     }
 
-    let result = `📉 *AI အမှားဆက် အချိန်မှတ်တမ်း*\n`;
+    let result = `📉 *AI အမှားဆက် မှတ်တမ်း*\n`;
+    result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    result += `📊 အမှန်: ${totalWins} ပွဲ | အမှား: ${totalLosses} ပွဲ\n`;
     result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-    // နောက်ဆုံး ၁၀ ခုကိုပြရန်
     const recentStreaks = streaks.slice(-10).reverse();
     
-    recentStreaks.forEach((streak, index) => {
+    recentStreaks.forEach((streak) => {
         const ongoing = streak.isOngoing ? '🔄 (ဆက်လက်ဖြစ်နေဆဲ)' : '✅ (ပြီးဆုံး)';
         const count = streak.streakCount;
         const start = streak.startIssue?.slice(-3) || 'N/A';
         const end = streak.endIssue?.slice(-3) || 'N/A';
         
-        // အချိန်ကွာခြားချက်တွက်ရန်
-        let timeDiff = 'N/A';
-        if (streak.startTime !== 'N/A' && streak.endTime !== 'N/A' && streak.endTime !== '🔄 ဆက်လက်ဖြစ်ပေါ်နေဆဲ') {
-            try {
-                const startDate = new Date(streak.startTime);
-                const endDate = new Date(streak.endTime);
-                const diffMs = endDate - startDate;
-                const diffMin = Math.floor(diffMs / 60000);
-                const diffSec = Math.floor((diffMs % 60000) / 1000);
-                timeDiff = `${diffMin}မိနစ် ${diffSec}စက္ကန့်`;
-            } catch (e) {
-                timeDiff = 'N/A';
+        result += `🔴 *အမှားဆက် #${streak.streakIndex}* (${count} ပွဲ) ${ongoing}\n`;
+        result += `📌 ပွဲစဉ်: ${start} → ${end}\n`;
+        result += `⏱️ ကြာချိန်: ${streak.streakTime || 'N/A'}\n`;
+        
+        if (streak.gapToNextLoss !== undefined && streak.gapToNextLoss !== 'ဆက်လက်ဖြစ်နေဆဲ') {
+            if (streak.gapToNextLoss > 0) {
+                result += `⏳ နောက်အမှားဆက်အထိ ကြားပွဲ: ${streak.gapToNextLoss} ပွဲ`;
+                if (streak.gapTime && streak.gapTime !== 'N/A') {
+                    result += ` (${streak.gapTime})`;
+                }
+                result += `\n`;
+            } else {
+                result += `⏳ နောက်အမှားဆက်အထိ ကြားပွဲ: မရှိပါ (ဆက်တိုက်အမှားဆက်)\n`;
             }
         }
-
-        result += `🔴 *အမှားဆက် #${index + 1}* (${count} ပွဲ) ${ongoing}\n`;
-        result += `📌 ပွဲစဉ်: ${start} → ${end}\n`;
-        if (timeDiff !== 'N/A') {
-            result += `⏱️ ကြာချိန်: ${timeDiff}\n`;
+        
+        if (streak.gapWins !== undefined && streak.gapWins !== 'ဆက်လက်ဖြစ်နေဆဲ') {
+            if (streak.gapWins > 0) {
+                result += `📊 နောက်အမှားဆက်မလာခင် အမှန်ပွဲ: ${streak.gapWins} ပွဲ\n`;
+            } else {
+                result += `📊 နောက်အမှားဆက်မလာခင် အမှန်ပွဲ: မရှိပါ\n`;
+            }
         }
+        
         result += `📋 အသေးစိတ်:\n`;
         streak.details.forEach((d, idx) => {
             const resultEmoji = d.result === "Big" ? "🏞️ကြီး" : "🌄သေး";
             const predEmoji = d.prediction === "Big" ? "🏞️ကြီး" : "🌄သေး";
-            result += `   ${idx+1}. ${d.issue} | ${predEmoji}→${resultEmoji} (${d.number})\n`;
+            const statusEmoji = d.status === "✅" ? "✅" : "❌";
+            result += `   ${idx+1}. ${d.issue} | ${predEmoji}→${resultEmoji} (${d.number}) ${statusEmoji}`;
+            if (d.time && d.time !== 'N/A') {
+                result += ` 🕐 ${d.time}`;
+            }
+            result += `\n`;
         });
         result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     });
 
-    // Summary
     const totalStreaks = streaks.length;
     const completed = streaks.filter(s => !s.isOngoing).length;
     const ongoing = streaks.filter(s => s.isOngoing).length;
     const avgStreakCount = streaks.reduce((sum, s) => sum + s.streakCount, 0) / totalStreaks;
+    
+    let avgGap = 0;
+    const gapData = streaks.filter(s => typeof s.gapToNextLoss === 'number' && s.gapToNextLoss >= 0);
+    if (gapData.length > 0) {
+        avgGap = gapData.reduce((sum, s) => sum + s.gapToNextLoss, 0) / gapData.length;
+    }
     
     result += `📊 *အနှစ်ချုပ်*\n`;
     result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -1120,6 +1240,11 @@ function formatLossStreakTiming(streaks) {
     result += `• ပြီးဆုံးပြီး: ${completed} ကြိမ်\n`;
     result += `• ဆက်လက်ဖြစ်နေဆဲ: ${ongoing} ကြိမ်\n`;
     result += `• ပျမ်းမျှ အမှားဆက်အရေအတွက်: ${avgStreakCount.toFixed(1)} ပွဲ\n`;
+    if (avgGap > 0) {
+        result += `• ပျမ်းမျှ ကြားပွဲအရေအတွက်: ${avgGap.toFixed(1)} ပွဲ\n`;
+    }
+    result += `• စုစုပေါင်းအမှန်: ${totalWins} ပွဲ\n`;
+    result += `• စုစုပေါင်းအမှား: ${totalLosses} ပွဲ\n`;
     result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
     result += `🕐 နောက်ဆုံး ခွဲခြမ်းစိတ်ဖြာချိန်: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}`;
 
@@ -1556,7 +1681,8 @@ async function monitoringLoop(chatId) {
                             issue: currentIssue.slice(-5),
                             result: realSide,
                             prediction: data.last_pred,
-                            number: realNumber
+                            number: realNumber,
+                            timestamp: new Date().toISOString()  // ADD TIMESTAMP HERE
                         });
                         if (data.aiLogs.length > 100) data.aiLogs = data.aiLogs.slice(0, 100);
                         const nickname = data.nickname || `95****${(data.username || '').slice(-3)}`;
@@ -1933,14 +2059,15 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     }
 
+    // ========== LOSS STREAK TIMING ==========
     if (text === "📊 Loss Streak Timing") {
         if (!data.aiLogs || data.aiLogs.length < 2) {
             return bot.sendMessage(chatId, "📊 AI မှတ်တမ်း အနည်းဆုံး ၂ ပွဲလိုအပ်ပါတယ်။");
         }
         await bot.sendMessage(chatId, "⏳ အမှားဆက် အချိန်မှတ်တမ်း ခွဲခြမ်းစိတ်ဖြာနေပါသည်...");
         
-        const result = analyzeLossStreakWithTiming(data.aiLogs, data.betHistory);
-        const formatted = formatLossStreakTiming(result.streaks);
+        const result = analyzeLossStreakWithTiming(data.aiLogs);
+        const formatted = formatLossStreakTiming(result.streaks, result.totalWins, result.totalLosses);
         await bot.sendMessage(chatId, formatted, { parse_mode: "Markdown" });
         return;
     }
