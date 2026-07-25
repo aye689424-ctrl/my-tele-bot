@@ -23,7 +23,7 @@ const DATA_FILE = path.join(__dirname, 'user_data.json');
 const PUBLIC_DATA_FILE = path.join(__dirname, 'public_data.json');
 const MEMORY_FILE = path.join(__dirname, 'smart_memory.json');
 const ENSEMBLE_FILE = path.join(__dirname, 'ensemble_weights.json');
-const LOSS_STREAK_FILE = path.join(__dirname, 'loss_streak_timing.json'); // NEW
+const LOSS_STREAK_FILE = path.join(__dirname, 'loss_streak_timing.json');
 
 function loadAllData() {
     try {
@@ -114,7 +114,7 @@ function saveEnsembleWeights(data) {
     }
 }
 
-// ========== LOSS STREAK TIMING STORAGE (NEW) ==========
+// ========== LOSS STREAK TIMING STORAGE ==========
 function loadLossStreakData() {
     try {
         if (fs.existsSync(LOSS_STREAK_FILE)) {
@@ -227,7 +227,7 @@ function saveUserData(chatId, data) {
     saveAllData(allUsers);
 }
 
-// ========== KELLY CRITERION (FIXED) ==========
+// ========== KELLY CRITERION ==========
 function kellyCriterionBetSize(confidence, balance, baseBet) {
     const b = 0.96;
     const p = confidence / 100;
@@ -243,7 +243,7 @@ function kellyCriterionBetSize(confidence, balance, baseBet) {
     return Math.max(Math.round(finalBet), 10);
 }
 
-// ========== ENSEMBLE AI ENGINE ==========
+// ========== ENSEMBLE PREDICTOR ==========
 class EnsemblePredictor {
     constructor() {
         this.weights = loadEnsembleWeights();
@@ -979,7 +979,7 @@ function formatLossStreakShort(aiLogs) {
     return `🔥 အမှားအဆက်: ${analysis.maxStreak} ပွဲ (${analysis.worstStreak?.startIssue || 'N/A'} → ${analysis.worstStreak?.endIssue || 'N/A'})`;
 }
 
-// ========== LOSS STREAK TIMING ANALYZER (NEW) ==========
+// ========== LOSS STREAK TIMING ANALYZER ==========
 function analyzeLossStreakWithTiming(aiLogs, betHistory) {
     if (!aiLogs || aiLogs.length < 2) {
         return { streaks: [], summary: "📊 AI မှတ်တမ်းမရှိသေးပါ (အနည်းဆုံး ၂ ပွဲလိုအပ်)" };
@@ -1101,10 +1101,27 @@ function formatLossStreakTiming(streaks) {
         }
         result += `📋 အသေးစိတ်:\n`;
         streak.details.forEach((d, idx) => {
-            result += `   ${idx+1}. ${d.issue} | ${d.prediction}→${d.result} (${d.number})\n`;
+            const resultEmoji = d.result === "Big" ? "🏞️ကြီး" : "🌄သေး";
+            const predEmoji = d.prediction === "Big" ? "🏞️ကြီး" : "🌄သေး";
+            result += `   ${idx+1}. ${d.issue} | ${predEmoji}→${resultEmoji} (${d.number})\n`;
         });
         result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     });
+
+    // Summary
+    const totalStreaks = streaks.length;
+    const completed = streaks.filter(s => !s.isOngoing).length;
+    const ongoing = streaks.filter(s => s.isOngoing).length;
+    const avgStreakCount = streaks.reduce((sum, s) => sum + s.streakCount, 0) / totalStreaks;
+    
+    result += `📊 *အနှစ်ချုပ်*\n`;
+    result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    result += `• စုစုပေါင်း အမှားဆက်: ${totalStreaks} ကြိမ်\n`;
+    result += `• ပြီးဆုံးပြီး: ${completed} ကြိမ်\n`;
+    result += `• ဆက်လက်ဖြစ်နေဆဲ: ${ongoing} ကြိမ်\n`;
+    result += `• ပျမ်းမျှ အမှားဆက်အရေအတွက်: ${avgStreakCount.toFixed(1)} ပွဲ\n`;
+    result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    result += `🕐 နောက်ဆုံး ခွဲခြမ်းစိတ်ဖြာချိန်: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}`;
 
     return result;
 }
@@ -1750,7 +1767,7 @@ const mainMenu = {
             ["📉 Check AI Loss Streak", "🌍 Global Dashboard"],
             ["👤 Set Nickname", "🧠 Brain Stats"],
             ["🎯 VIP Signal On/Off", "📊 Memory Stats"],
-            ["🧬 Ensemble Weights", "📊 Loss Streak Timing"], // NEW
+            ["🧬 Ensemble Weights", "📊 Loss Streak Timing"],
             ["🚪 Logout"]
         ],
         resize_keyboard: true
@@ -1825,7 +1842,7 @@ bot.on('message', async (msg) => {
         delete data.username;
         saveUserData(chatId, data);
 
-        let welcomeMsg = `🎯 *WinGo Sniper Pro v4.0* 🎯\n`;
+        let welcomeMsg = `🎯 *WinGo Sniper Pro v4.1* 🎯\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
         welcomeMsg += `⏰ 30 Sec Game - Ensemble AI\n`;
         welcomeMsg += `🧠 *Mode 8 မျိုး:*\n`;
@@ -1835,6 +1852,7 @@ bot.on('message', async (msg) => {
         welcomeMsg += `🎯 *VIP Signal System* - Pattern Detection\n`;
         welcomeMsg += `📊 *Kelly Criterion* - Smart Bet Sizing (Min: Bet Plan)\n`;
         welcomeMsg += `🧬 *Ensemble AI* - 8 Methods Combined\n`;
+        welcomeMsg += `📉 *Loss Streak Timing* - အချိန်မှတ်တမ်း\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n\n`;
         welcomeMsg += `ဖုန်းနံပါတ်ပေးပါ (သို့) Global Dashboard ကြည့်ပါ:`;
 
@@ -1915,7 +1933,6 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     }
 
-    // ========== NEW: LOSS STREAK TIMING ==========
     if (text === "📊 Loss Streak Timing") {
         if (!data.aiLogs || data.aiLogs.length < 2) {
             return bot.sendMessage(chatId, "📊 AI မှတ်တမ်း အနည်းဆုံး ၂ ပွဲလိုအပ်ပါတယ်။");
@@ -2200,7 +2217,7 @@ bot.on('message', async (msg) => {
             await checkBalance(chatId);
             data = getUserData(chatId);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, `✅ Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\nSignal များ User သို့သာ ပို့ပါမည်။\n🎯 VIP Signal System: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}\n🧬 Ensemble Ultra: Available in Auto Mode`, mainMenu);
+            await bot.sendMessage(chatId, `✅ Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\nSignal များ User သို့သာ ပို့ပါမည်။\n🎯 VIP Signal System: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}\n🧬 Ensemble Ultra: Available in Auto Mode\n📊 Loss Streak Timing: Available in Menu`, mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed! နံပါတ်နှင့် Password ပြန်စစ်ပါ။");
             delete data.tempPhone;
@@ -2250,10 +2267,10 @@ bot.on('callback_query', async (query) => {
 // ========== HELP COMMAND ==========
 bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id.toString();
-    let helpText = `📖 *WinGo Pro Bot v4.0 - Ensemble Ultra*\n━━━━━━━━━━━━━━━━\n\n🤖 *Auto Modes (8 Modes)*\n`;
+    let helpText = `📖 *WinGo Pro Bot v4.1 - Ensemble Ultra*\n━━━━━━━━━━━━━━━━\n\n🤖 *Auto Modes (8 Modes)*\n`;
     helpText += `• 🔄 Follow - နောက်ဆုံးပွဲအတိုင်း\n• 🔃 Reverse - ပြောင်းပြန်ထိုး\n• 🤖 AI Correction - AI မှားချိန်မှထိုး\n• 🧠 GetEmerdList - Hot/Cold+Trend\n• 🧬 Smart Hybrid - AI+Website ပေါင်း\n• 🧠 AI Brain - Master Decision\n• 🧠 Cautious Brain - Markov Chain + AI\n• 🧠 *Ensemble Ultra* - 8 Methods Combined!\n`;
     helpText += `\n🧬 *Ensemble Ultra Features:*\n• Multi-Timeframe Analysis\n• Weighted Voting (7 modes)\n• Pattern Matching Engine\n• Monte Carlo Simulation\n• Anomaly Detection\n• Markov Chain Prediction\n• AI Brain + Hybrid\n• Kelly Criterion (Min: Bet Plan)\n• Auto Weight Adjustment\n`;
-    helpText += `\n📊 *Loss Streak Timing:*\n• အမှားဆက် (၂ ပွဲအထက်) ကို အချိန်နဲ့တစ်ပါတည်း မှတ်တမ်းပြုစုထားပါသည်။\n• ပွဲစဉ်များနှင့် ကြာချိန်ကို အသေးစိတ်ဖော်ပြထားပါသည်။\n• Menu မှ "📊 Loss Streak Timing" ကိုနှိပ်၍ ကြည့်ရှုနိုင်ပါသည်။\n`;
+    helpText += `\n📊 *Loss Streak Timing (NEW!):*\n• အမှားဆက် (၂ ပွဲအထက်) ကို အချိန်နဲ့တစ်ပါတည်း မှတ်တမ်းပြုစုထားပါသည်။\n• ပွဲစဉ်များနှင့် ကြာချိန်ကို အသေးစိတ်ဖော်ပြထားပါသည်။\n• Menu မှ "📊 Loss Streak Timing" ကိုနှိပ်၍ ကြည့်ရှုနိုင်ပါသည်။\n• ပျမ်းမျှအမှားဆက်အရေအတွက်ကိုပါ တွက်ပြပေးပါသည်။\n`;
     await bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
 });
 
@@ -2318,7 +2335,7 @@ http.createServer((req, res) => {
         });
     } else {
         res.writeHead(200);
-        res.end('WinGo Pro Bot v4.0 - Ensemble Ultra AI (Fixed)');
+        res.end('WinGo Pro Bot v4.1 - Ensemble Ultra AI + Loss Streak Timing');
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
@@ -2326,7 +2343,7 @@ http.createServer((req, res) => {
     console.log(`🎯 VIP Signal System: READY`);
     console.log(`📊 Kelly Criterion: ENABLED (Min: Bet Plan, Min: 10 MMK)`);
     console.log(`🔧 Ensemble Weights Bug: FIXED`);
-    console.log(`📊 Loss Streak Timing: ACTIVE`);
+    console.log(`📊 Loss Streak Timing: ACTIVE (v4.1)`);
 });
 
-console.log("✅ WinGo Pro Bot v4.0 - All Bugs Fixed");
+console.log("✅ WinGo Pro Bot v4.1 - All Bugs Fixed + Loss Streak Timing");
