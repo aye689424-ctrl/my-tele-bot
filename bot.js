@@ -24,7 +24,7 @@ lossBot.setWebHook(`${APP_URL}/lossbot${LOSS_BOT_TOKEN}`).then(() => {
 lossBot.on('message', async (msg) => {
     const chatId = msg.chat.id.toString();
     if (msg.text === '/start') {
-        await lossBot.sendMessage(chatId, `📊 *Loss Streak Notification Bot*\n━━━━━━━━━━━━━━━━\n✅ အမှားဆက်တိုင်း အလိုအလျောက် အသိပေးပါမည်။\n✅ ပွဲစဉ်၊ ကြာချိန်၊ ကြားပွဲအရေအတွက် ပါဝင်ပါသည်။\n✅ အမှန်ပွဲပြန်ဝင်တဲ့အထိ ဆက်ပို့ပေးပါမည်။\n✅ ထိုးမှတ်တမ်း၊ အမြတ်/အရှုံး၊ လက်ကျန်ငွေပါ ပါဝင်ပါသည်။`, { parse_mode: "Markdown" });
+        await lossBot.sendMessage(chatId, `📊 *Loss Streak Notification Bot v2.0*\n━━━━━━━━━━━━━━━━\n✅ အမှားဆက် ၁ ပွဲမှ စ၍ အသိပေးပါမည်။\n✅ အမှားဆက်စချိန်၊ ပြီးဆုံးချိန် ပါဝင်ပါသည်။\n✅ ထိုးမှတ်တမ်း၊ Bet Plan အဆင့်၊ အမြတ်/အရှုံး ပါဝင်ပါသည်။\n✅ AI ပြန်မှန်ချိန်ကိုလည်း အသိပေးပါမည်။`, { parse_mode: "Markdown" });
     }
 });
 
@@ -1332,14 +1332,14 @@ function formatLossStreakStatistics(stats) {
     return result;
 }
 
-// ========== SEND LOSS STREAK NOTIFICATION TO LOSS BOT ==========
+// ========== SEND LOSS STREAK NOTIFICATION TO LOSS BOT (UPDATED) ==========
 async function sendLossStreakNotification(chatId, userData, streakData) {
     try {
         if (!lossBotUsers.users.includes(chatId)) {
             lossBotUsers.users.push(chatId);
             saveLossBotUsers(lossBotUsers);
             try {
-                await lossBot.sendMessage(chatId, `✅ သင့်အား အမှားဆက် အသိပေးချက်များ ပို့ရန် စာရင်းသွင်းပြီးပါပြီ။`);
+                await lossBot.sendMessage(chatId, `✅ သင့်အား အမှားဆက် အသိပေးချက်များ ပို့ရန် စာရင်းသွင်းပြီးပါပြီ။\n📊 အမှားဆက် ၁ ပွဲမှ စ၍ အသိပေးပါမည်။`);
             } catch (e) {}
         }
 
@@ -1351,19 +1351,92 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
         const gapWins = streakData.gapWins || 0;
         const gapTime = streakData.gapTime || 'N/A';
         const isOngoing = streakData.isOngoing || false;
+        const isRecovery = streakData.isRecovery || false;
         const details = streakData.details || [];
         const betAmount = streakData.betAmount || 0;
         const betSide = streakData.betSide || 'N/A';
         const betStatus = streakData.betStatus || 'N/A';
         const pnl = streakData.pnl || 0;
         const balance = userData.currentBalance || 0;
+        const betStep = streakData.betStep || 0;
+        const totalBetSteps = userData.betPlan?.length || 8;
 
-        let msg = `🔴 *အမှားဆက် အသိပေးချက်*\n`;
+        // Bet Plan step display
+        let stepText = '';
+        if (betStep >= 0) {
+            stepText = `📋 *ထိုးအဆင့်:* ${betStep + 1}/${totalBetSteps} (${userData.betPlan?.[betStep] || 'N/A'} MMK)`;
+        }
+
+        let msg = '';
+        
+        // ===== AI RECOVERY NOTIFICATION =====
+        if (isRecovery && streakCount === 1) {
+            msg = `🟢 *AI ပြန်မှန်ချိန် အသိပေးချက်*\n`;
+            msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
+            msg += `✅ *AI ပြန်မှန်ပါပြီ!*\n`;
+            msg += `📌 *ပွဲစဉ်:* ${endIssue}\n`;
+            msg += `🎯 *ခန့်မှန်း:* ${details[0]?.prediction === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+            msg += `📊 *ထွက်ဂဏန်း:* ${details[0]?.number || 'N/A'} → ${details[0]?.result === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+            msg += `⏱️ *ပြန်မှန်ချိန်:* ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}\n`;
+            if (betAmount > 0) {
+                msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                msg += `📋 *ထိုးမှတ်တမ်း*\n`;
+                msg += `🎯 *ထိုးဘက်:* ${betSide === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+                msg += `💰 *ထိုးငွေ:* ${betAmount} MMK\n`;
+                msg += `📊 *ရလဒ်:* ${betStatus}\n`;
+                if (pnl !== 0) {
+                    const pnlText = pnl >= 0 ? `+${pnl.toFixed(2)}` : `${pnl.toFixed(2)}`;
+                    msg += `💰 *အမြတ်/အရှုံး:* ${pnlText} MMK\n`;
+                }
+                if (stepText) msg += `${stepText}\n`;
+                msg += `🏦 *လက်ကျန်ငွေ:* ${balance.toFixed(2)} MMK\n`;
+            }
+            msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            msg += `🕐 အချိန်: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}`;
+            
+            await lossBot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+            return;
+        }
+
+        // ===== LOSS STREAK NOTIFICATION =====
+        if (streakCount === 1) {
+            msg = `🟡 *အမှားဆက် စတင်ချိန် အသိပေးချက်*\n`;
+            msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
+            msg += `❌ *၁ ပွဲမှားပါပြီ!*\n`;
+            msg += `📌 *ပွဲစဉ်:* ${endIssue}\n`;
+            msg += `🎯 *ခန့်မှန်း:* ${details[0]?.prediction === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+            msg += `📊 *ထွက်ဂဏန်း:* ${details[0]?.number || 'N/A'} → ${details[0]?.result === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+            msg += `⏱️ *စတင်ချိန်:* ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}\n`;
+            if (betAmount > 0) {
+                msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                msg += `📋 *ထိုးမှတ်တမ်း*\n`;
+                msg += `🎯 *ထိုးဘက်:* ${betSide === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n`;
+                msg += `💰 *ထိုးငွေ:* ${betAmount} MMK\n`;
+                msg += `📊 *ရလဒ်:* ${betStatus}\n`;
+                if (pnl !== 0) {
+                    const pnlText = pnl >= 0 ? `+${pnl.toFixed(2)}` : `${pnl.toFixed(2)}`;
+                    msg += `💰 *အမြတ်/အရှုံး:* ${pnlText} MMK\n`;
+                }
+                if (stepText) msg += `${stepText}\n`;
+                msg += `🏦 *လက်ကျန်ငွေ:* ${balance.toFixed(2)} MMK\n`;
+            }
+            msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            msg += `🕐 အချိန်: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}`;
+            
+            await lossBot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+            return;
+        }
+
+        // ===== LOSS STREAK CONTINUE (2+ streaks) =====
+        msg = `🔴 *အမှားဆက် အသိပေးချက်*\n`;
         msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
         msg += `📊 *အမှားဆက်အရေအတွက်:* ${streakCount} ပွဲ\n`;
         msg += `📌 *ပွဲစဉ်:* ${startIssue} → ${endIssue}\n`;
         msg += `⏱️ *ကြာချိန်:* ${streakTime}\n`;
+        msg += `⏱️ *စတင်ချိန်:* ${new Date(streakData.startTime || Date.now()).toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}\n`;
         
         if (gapWins > 0) {
             msg += `📊 *ကြားပွဲ:* ${gapWins} ပွဲ`;
@@ -1392,6 +1465,7 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
                 const pnlText = pnl >= 0 ? `+${pnl.toFixed(2)}` : `${pnl.toFixed(2)}`;
                 msg += `💰 *အမြတ်/အရှုံး:* ${pnlText} MMK\n`;
             }
+            if (stepText) msg += `${stepText}\n`;
             msg += `🏦 *လက်ကျန်ငွေ:* ${balance.toFixed(2)} MMK\n`;
         }
         
@@ -1720,6 +1794,12 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
 
 // ========== MONITORING LOOP ==========
 async function monitoringLoop(chatId) {
+    let previousLossStreak = 0;
+    let lastLossStreakStartTime = null;
+    let lossStreakStartIssue = null;
+    let lossStreakDetails = [];
+    let wasInLossStreak = false;
+
     while (true) {
         let data = getUserData(chatId);
         if (!data.running) break;
@@ -1828,8 +1908,10 @@ async function monitoringLoop(chatId) {
                         data = getUserData(chatId);
                     }
 
+                    // ========== TRACK AI PREDICTION RESULT ==========
+                    let aiCorrect = false;
                     if (data.last_pred) {
-                        const aiCorrect = (data.last_pred === realSide);
+                        aiCorrect = (data.last_pred === realSide);
                         data.aiLogs.unshift({
                             status: aiCorrect ? "✅" : "❌",
                             issue: currentIssue.slice(-5),
@@ -1859,6 +1941,131 @@ async function monitoringLoop(chatId) {
                     data.last_pred = ai.side;
                     saveUserData(chatId, data);
 
+                    // ========== LOSS STREAK NOTIFICATION LOGIC ==========
+                    const currentLossStreak = data.consecutiveLosses || 0;
+                    
+                    // Get bet details for notification
+                    let betAmount = 0;
+                    let betSide = 'N/A';
+                    let betStatus = 'N/A';
+                    let pnl = 0;
+                    let betStep = -1;
+                    
+                    const recentBet = data.betHistory.find(b => b.issue === currentIssue.slice(-5));
+                    if (recentBet) {
+                        betAmount = recentBet.amount || 0;
+                        betSide = recentBet.side || 'N/A';
+                        betStatus = recentBet.status || 'N/A';
+                        pnl = recentBet.pnl || 0;
+                        betStep = recentBet.autoStep || -1;
+                    }
+
+                    // CASE 1: AI just recovered (was in loss streak, now correct)
+                    if (wasInLossStreak && aiCorrect && currentLossStreak === 0) {
+                        const recoveryData = {
+                            streakCount: 1,
+                            startIssue: lossStreakStartIssue || currentIssue.slice(-5),
+                            endIssue: currentIssue.slice(-5),
+                            streakTime: 'N/A',
+                            gapWins: 0,
+                            gapTime: 'N/A',
+                            isOngoing: false,
+                            isRecovery: true,
+                            details: [{
+                                issue: currentIssue.slice(-5),
+                                prediction: data.last_pred,
+                                result: realSide,
+                                number: realNumber
+                            }],
+                            betAmount: betAmount,
+                            betSide: betSide,
+                            betStatus: betStatus,
+                            pnl: pnl,
+                            betStep: betStep
+                        };
+                        await sendLossStreakNotification(chatId, data, recoveryData);
+                        wasInLossStreak = false;
+                        lossStreakStartIssue = null;
+                        lossStreakDetails = [];
+                    }
+
+                    // CASE 2: Loss streak started (first loss)
+                    if (!aiCorrect && currentLossStreak === 1 && previousLossStreak === 0) {
+                        lossStreakStartIssue = currentIssue.slice(-5);
+                        lossStreakDetails = [{
+                            issue: currentIssue.slice(-5),
+                            prediction: data.last_pred,
+                            result: realSide,
+                            number: realNumber
+                        }];
+                        lastLossStreakStartTime = new Date();
+                        wasInLossStreak = true;
+                        
+                        const streakData = {
+                            streakCount: 1,
+                            startIssue: lossStreakStartIssue,
+                            endIssue: currentIssue.slice(-5),
+                            streakTime: 'N/A',
+                            gapWins: 0,
+                            gapTime: 'N/A',
+                            isOngoing: true,
+                            isRecovery: false,
+                            details: lossStreakDetails,
+                            betAmount: betAmount,
+                            betSide: betSide,
+                            betStatus: betStatus,
+                            pnl: pnl,
+                            betStep: betStep,
+                            startTime: lastLossStreakStartTime.toISOString()
+                        };
+                        await sendLossStreakNotification(chatId, data, streakData);
+                    }
+
+                    // CASE 3: Loss streak continuing (2+ losses)
+                    if (!aiCorrect && currentLossStreak >= 2) {
+                        lossStreakDetails.push({
+                            issue: currentIssue.slice(-5),
+                            prediction: data.last_pred,
+                            result: realSide,
+                            number: realNumber
+                        });
+                        
+                        // Calculate streak time
+                        let streakTime = 'N/A';
+                        if (lastLossStreakStartTime) {
+                            const now = new Date();
+                            const diffMs = now - lastLossStreakStartTime;
+                            if (diffMs > 0) {
+                                const diffMin = Math.floor(diffMs / 60000);
+                                const diffSec = Math.floor((diffMs % 60000) / 1000);
+                                streakTime = `${diffMin}မိနစ် ${diffSec}စက္ကန့်`;
+                            }
+                        }
+                        
+                        const streakData = {
+                            streakCount: currentLossStreak,
+                            startIssue: lossStreakStartIssue || currentIssue.slice(-5),
+                            endIssue: currentIssue.slice(-5),
+                            streakTime: streakTime,
+                            gapWins: 0,
+                            gapTime: 'N/A',
+                            isOngoing: true,
+                            isRecovery: false,
+                            details: lossStreakDetails,
+                            betAmount: betAmount,
+                            betSide: betSide,
+                            betStatus: betStatus,
+                            pnl: pnl,
+                            betStep: betStep,
+                            startTime: lastLossStreakStartTime ? lastLossStreakStartTime.toISOString() : new Date().toISOString()
+                        };
+                        await sendLossStreakNotification(chatId, data, streakData);
+                        wasInLossStreak = true;
+                    }
+
+                    previousLossStreak = currentLossStreak;
+
+                    // ========== AUTO BET LOGIC ==========
                     if (data.autoRunning && !data.manualBetLock) {
                         let betSide = null;
                         let betAmount = data.betPlan[data.currentBetStep];
@@ -2027,70 +2234,6 @@ async function monitoringLoop(chatId) {
                         reply_markup: { inline_keyboard: [[{ text: "🔵 Big", callback_data: "bet_Big" }, { text: "🔴 Small", callback_data: "bet_Small" }]] }
                     });
 
-                    // ========== SEND LOSS STREAK NOTIFICATION ==========
-                    // Check if there is a loss streak
-                    if (data.consecutiveLosses >= 2) {
-                        const lossStreakCount = data.consecutiveLosses;
-                        const startIssue = data.last_issue ? (BigInt(data.last_issue) - BigInt(lossStreakCount - 1)).toString() : 'N/A';
-                        const endIssue = data.last_issue || 'N/A';
-                        
-                        // Calculate streak time
-                        let streakTime = 'N/A';
-                        const recentLosses = data.aiLogs.slice(0, lossStreakCount);
-                        if (recentLosses.length >= 2) {
-                            const firstLoss = recentLosses[recentLosses.length - 1];
-                            const lastLoss = recentLosses[0];
-                            if (firstLoss?.timestamp && lastLoss?.timestamp) {
-                                try {
-                                    const startDate = new Date(firstLoss.timestamp);
-                                    const endDate = new Date(lastLoss.timestamp);
-                                    const diffMs = endDate - startDate;
-                                    if (diffMs > 0) {
-                                        const diffMin = Math.floor(diffMs / 60000);
-                                        const diffSec = Math.floor((diffMs % 60000) / 1000);
-                                        streakTime = `${diffMin}မိနစ် ${diffSec}စက္ကန့်`;
-                                    }
-                                } catch (e) {}
-                            }
-                        }
-                        
-                        // Check if there was a bet placed during this streak
-                        let betAmount = 0;
-                        let betSide = 'N/A';
-                        let betStatus = 'N/A';
-                        let pnl = 0;
-                        
-                        const recentBet = data.betHistory.find(b => b.issue === endIssue.slice(-5));
-                        if (recentBet) {
-                            betAmount = recentBet.amount || 0;
-                            betSide = recentBet.side || 'N/A';
-                            betStatus = recentBet.status || 'N/A';
-                            pnl = recentBet.pnl || 0;
-                        }
-                        
-                        // Send notification
-                        const streakData = {
-                            streakCount: lossStreakCount,
-                            startIssue: startIssue.slice(-5),
-                            endIssue: endIssue.slice(-5),
-                            streakTime: streakTime,
-                            gapWins: 0,
-                            gapTime: 'N/A',
-                            isOngoing: true,
-                            details: recentLosses.map(l => ({
-                                issue: l.issue,
-                                prediction: l.prediction,
-                                result: l.result,
-                                number: l.number
-                            })),
-                            betAmount: betAmount,
-                            betSide: betSide,
-                            betStatus: betStatus,
-                            pnl: pnl
-                        };
-                        
-                        await sendLossStreakNotification(chatId, data, streakData);
-                    }
                 }
             }
         } catch (error) {
@@ -2191,7 +2334,7 @@ bot.on('message', async (msg) => {
             lossBotUsers.users.push(chatId);
             saveLossBotUsers(lossBotUsers);
             try {
-                await lossBot.sendMessage(chatId, `✅ သင့်အား အမှားဆက် အသိပေးချက်များ ပို့ရန် စာရင်းသွင်းပြီးပါပြီ။\n\n📊 အမှားဆက်တစ်ခုဖြစ်တိုင်း အသိပေးပါမည်။`);
+                await lossBot.sendMessage(chatId, `✅ သင့်အား အမှားဆက် အသိပေးချက်များ ပို့ရန် စာရင်းသွင်းပြီးပါပြီ။\n\n📊 အမှားဆက် ၁ ပွဲမှ စ၍ အသိပေးပါမည်။\n📊 AI ပြန်မှန်ချိန်ကိုလည်း အသိပေးပါမည်။`);
             } catch (e) {}
         }
 
@@ -2206,7 +2349,7 @@ bot.on('message', async (msg) => {
         welcomeMsg += `📊 *Kelly Criterion* - Smart Bet Sizing (Min: Bet Plan)\n`;
         welcomeMsg += `🧬 *Ensemble AI* - 8 Methods Combined\n`;
         welcomeMsg += `📊 *Loss Streak Stats* - အမှားဆက်စာရင်းအင်း\n`;
-        welcomeMsg += `📊 *Loss Bot* - အမှားဆက်တိုင်း အသိပေး\n`;
+        welcomeMsg += `📊 *Loss Bot* - အမှားဆက် ၁ပွဲမှစ၍ အသိပေး\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n\n`;
         welcomeMsg += `ဖုန်းနံပါတ်ပေးပါ (သို့) Global Dashboard ကြည့်ပါ:`;
 
@@ -2713,6 +2856,8 @@ http.createServer((req, res) => {
     console.log(`📊 Loss Streak Stats: ACTIVE (v4.1)`);
     console.log(`📊 Loss Bot Token: ${LOSS_BOT_TOKEN}`);
     console.log(`📊 Loss Bot Users: ${lossBotUsers.users.length}`);
+    console.log(`📊 Loss Bot: 1 loss = notification`);
+    console.log(`📊 AI Recovery: notification on first win after loss`);
 });
 
 console.log("✅ WinGo Pro Bot v4.1 - All Bugs Fixed + Loss Streak Stats + Loss Bot");
