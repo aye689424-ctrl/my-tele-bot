@@ -313,7 +313,7 @@ function getBaseUrl(chatId) {
     } else if (data.platform === 'CKLOTTERY') {
         return PLATFORMS.CKLOTTERY.baseUrl;
     }
-    return PLATFORMS.BIGWIN.baseUrl; // default
+    return PLATFORMS.BIGWIN.baseUrl;
 }
 
 // ========== KELLY CRITERION ==========
@@ -846,7 +846,6 @@ function getVipSignalMessage(chatId, userData, pattern, aiPrediction, nextIssue)
 async function checkBalance(chatId) {
     const data = getUserData(chatId);
     if (!data || !data.token) return null;
-    const baseUrl = getBaseUrl(chatId);
     try {
         const res = await callApi(chatId, "GetUserInfo", {}, data.token);
         if (res?.msgCode === 0 && res.data) {
@@ -1579,9 +1578,10 @@ async function sendStatusNotification(chatId, userData) {
     }
 }
 
-async function getNextIssue(chatId, token) {
+async function getNextIssue(chatId) {
+    const data = getUserData(chatId);
     try {
-        const historyRes = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, token);
+        const historyRes = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, data.token);
         if (historyRes?.data?.list?.length > 0) {
             return (BigInt(historyRes.data.list[0].issueNumber) + 1n).toString();
         }
@@ -1643,10 +1643,11 @@ async function syncBetHistoryFromAPI(chatId) {
     }
 }
 
-async function getEmerdListPrediction(chatId, token) {
+async function getEmerdListPrediction(chatId) {
+    const data = getUserData(chatId);
     try {
-        const statsRes = await callApi(chatId, "GetEmerdList", { typeId: 30, gameType: 2 }, token);
-        const historyRes = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, token);
+        const statsRes = await callApi(chatId, "GetEmerdList", { typeId: 30, gameType: 2 }, data.token);
+        const historyRes = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, data.token);
         if (statsRes?.msgCode === 0 && historyRes?.msgCode === 0) {
             const freqData = statsRes.data.find(d => d.type === 1);
             const missingData = statsRes.data.find(d => d.type === 2);
@@ -1924,7 +1925,7 @@ async function monitoringLoop(chatId) {
                     const memoryResult = updateSmartMemory(chatId, data, realSide, realNumber, data.last_pred || "Big");
                     
                     if (memoryResult.pattern && data.vipSignalsEnabled) {
-                        const nextIss = await getNextIssue(chatId, data.token);
+                        const nextIss = await getNextIssue(chatId);
                         const vipMsg = getVipSignalMessage(chatId, data, memoryResult.pattern, data.last_pred || "Big", nextIss);
                         
                         const vipKeyboard = {
@@ -2186,7 +2187,7 @@ async function monitoringLoop(chatId) {
                                 betReason = `🤖 AI Correction - ${data.consecutiveLosses} ပွဲဆက်မှား၍ ထိုး`;
                             }
                         } else if (data.autoMode === 'emerdlist') {
-                            const pred = await getEmerdListPrediction(chatId, data.token);
+                            const pred = await getEmerdListPrediction(chatId);
                             betSide = pred.prediction;
                             betReason = `🧠 GetEmerdList - ${pred.reason}`;
                         } else if (data.autoMode === 'hybrid') {
@@ -2743,7 +2744,7 @@ bot.on('message', async (msg) => {
             saveUserData(chatId, data);
             return;
         }
-        const targetIssue = await getNextIssue(chatId, data.token);
+        const targetIssue = await getNextIssue(chatId);
         if (!targetIssue) {
             await bot.sendMessage(chatId, "❌ ပွဲစဉ်ရယူ၍မရပါ။");
             data.pendingSide = null;
@@ -2888,8 +2889,8 @@ bot.on('message', async (msg) => {
 
     if (text === "🧠 GetEmerdList ခန့်မှန်း") {
         await bot.sendMessage(chatId, "⏳ GetEmerdList API ခေါ်နေပါသည်...");
-        const pred = await getEmerdListPrediction(chatId, data.token);
-        const nextIssue = await getNextIssue(chatId, data.token);
+        const pred = await getEmerdListPrediction(chatId);
+        const nextIssue = await getNextIssue(chatId);
         let msg = `🧠 **GetEmerdList ခန့်မှန်းချက်**\n━━━━━━━━━━━━━━━━\n🚀 နောက်ပွဲစဉ်: ${nextIssue?.slice(-5) || 'N/A'}\n💡 ခန့်မှန်း: ${pred.prediction === "Big" ? "🔵 BIG" : "🔴 SMALL"}\n📝 အကြောင်း: ${pred.reason}`;
         await bot.sendMessage(chatId, msg, { reply_markup: { inline_keyboard: [[{ text: `💰 ${pred.prediction} ထိုးမည်`, callback_data: `bestbet_${pred.prediction}` }]] } });
         return;
@@ -2911,7 +2912,16 @@ bot.on('message', async (msg) => {
 
     // ========== PASSWORD INPUT ==========
     if (data.tempPhone && !data.token) {
-        const username = data.tempPhone.startsWith('09') ? '95' + data.tempPhone.slice(2) : data.tempPhone;
+        let username = data.tempPhone;
+        // Convert phone: 09xxxxxxxxx → 95xxxxxxxxx
+        if (username.startsWith('09')) {
+            username = '95' + username.slice(2);
+        } else if (username.startsWith('+95')) {
+            username = username.slice(1);
+        } else if (!username.startsWith('95') && username.length === 10) {
+            username = '95' + username;
+        }
+        
         await bot.sendMessage(chatId, "⏳ အကောင့်ဝင်နေပါသည်...");
         const res = await callApi(chatId, "Login", { phonetype: -1, logintype: "mobile", username, pwd: text });
         if (res?.msgCode === 0) {
