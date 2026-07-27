@@ -8,9 +8,14 @@ const { markovPredict } = require('./markovChain');
 
 // ========== CONFIG ==========
 const token = '8678622589:AAFLYmXlETlYmmICqGE7Fb9E-t-CYBvmPb0';
-const BASE_URL = "https://api.bigwinqaz.com/api/webapi/";
 const PORT = process.env.PORT || 8080;
 const APP_URL = process.env.APP_URL || 'https://my-tele-bot-1-ptlu.onrender.com';
+
+const bot = new TelegramBot(token);
+
+bot.setWebHook(`${APP_URL}/bot${token}`).then(() => {
+    console.log(`✅ Main Bot Webhook set`);
+}).catch(e => console.error('Main Bot Webhook error:', e.message));
 
 // ========== SECOND BOT FOR LOSS STREAK NOTIFICATIONS ==========
 const LOSS_BOT_TOKEN = '8813287318:AAEKNhJaWOJVlmUJMgJdT5Q2_iz7f7hHqrw';
@@ -20,6 +25,13 @@ lossBot.setWebHook(`${APP_URL}/lossbot${LOSS_BOT_TOKEN}`).then(() => {
     console.log(`✅ Loss Bot Webhook set`);
 }).catch(e => console.error('Loss Bot Webhook error:', e.message));
 
+lossBot.on('message', async (msg) => {
+    const chatId = msg.chat.id.toString();
+    if (msg.text === '/start') {
+        await lossBot.sendMessage(chatId, `📊 *Loss Streak Notification Bot*\n━━━━━━━━━━━━━━━━\n✅ အမှားဆက်တိုင်း အလိုအလျောက် အသိပေးပါမည်။`, { parse_mode: "Markdown" });
+    }
+});
+
 // ========== THIRD BOT FOR STATUS NOTIFICATIONS ==========
 const STATUS_BOT_TOKEN = '8444764459:AAGr-Y2Zn5Sl7bQsr_QJS5wTWXAuIJ8b_eU';
 const statusBot = new TelegramBot(STATUS_BOT_TOKEN);
@@ -28,19 +40,12 @@ statusBot.setWebHook(`${APP_URL}/statusbot${STATUS_BOT_TOKEN}`).then(() => {
     console.log(`✅ Status Bot Webhook set`);
 }).catch(e => console.error('Status Bot Webhook error:', e.message));
 
-// Status bot message handler
 statusBot.on('message', async (msg) => {
     const chatId = msg.chat.id.toString();
     if (msg.text === '/start') {
-        await statusBot.sendMessage(chatId, `📊 *Status Notification Bot*\n━━━━━━━━━━━━━━━━\n✅ သင့် WinGo Pro Bot ၏ အခြေအနေကို အသိပေးပါမည်။\n✅ အောက်ပါအချက်များ ပါဝင်ပါသည်:\n• Mode, Bet Plan, Stop Limit\n• Session Wins, Total Wins\n• Total Profit, Balance\n• Loss Streak\n• Best Mode\n✅ အလိုအလျောက် အသိပေးပါမည်။`, { parse_mode: "Markdown" });
+        await statusBot.sendMessage(chatId, `📊 *Status Notification Bot*\n━━━━━━━━━━━━━━━━\n✅ သင့် WinGo Pro Bot ၏ အခြေအနေကို အသိပေးပါမည်။`, { parse_mode: "Markdown" });
     }
 });
-
-const bot = new TelegramBot(token);
-
-bot.setWebHook(`${APP_URL}/bot${token}`).then(() => {
-    console.log(`✅ Main Bot Webhook set`);
-}).catch(e => console.error('Main Bot Webhook error:', e.message));
 
 // ========== LOCAL STORAGE ==========
 const DATA_FILE = path.join(__dirname, 'user_data.json');
@@ -140,7 +145,6 @@ function saveEnsembleWeights(data) {
     }
 }
 
-// ========== LOSS STREAK TIMING STORAGE ==========
 function loadLossStreakData() {
     try {
         if (fs.existsSync(LOSS_STREAK_FILE)) {
@@ -156,7 +160,6 @@ function saveLossStreakData(data) {
     } catch (e) {}
 }
 
-// ========== LOSS BOT USERS STORAGE ==========
 function loadLossBotUsers() {
     try {
         if (fs.existsSync(LOSS_BOT_USERS_FILE)) {
@@ -172,7 +175,6 @@ function saveLossBotUsers(data) {
     } catch (e) {}
 }
 
-// ========== STATUS BOT USERS STORAGE ==========
 function loadStatusBotUsers() {
     try {
         if (fs.existsSync(STATUS_BOT_USERS_FILE)) {
@@ -198,10 +200,27 @@ let publicData = loadPublicData();
 let smartMemory = loadSmartMemory();
 let ensembleWeights = loadEnsembleWeights();
 
+// ========== MULTI-PLATFORM CONFIG ==========
+const PLATFORMS = {
+    BIGWIN: {
+        name: 'BigWin',
+        emoji: '🔥',
+        baseUrl: 'https://api.bigwinqaz.com/api/webapi/',
+        website: 'https://www.bigwinqaz.com'
+    },
+    CKLOTTERY: {
+        name: 'CK Lottery',
+        emoji: '🎯',
+        baseUrl: 'https://ckygjf6r.com/api/webapi/',
+        website: 'https://www.cklottery.top'
+    }
+};
+
 // ========== USER DATA ==========
 function getUserData(chatId) {
     if (!allUsers[chatId]) {
         allUsers[chatId] = {
+            platform: null,
             token: null, phone: null, running: false,
             autoRunning: false, autoMode: null,
             betPlan: [10, 30, 60, 90, 150, 250, 400, 650],
@@ -285,6 +304,16 @@ function getUserData(chatId) {
 function saveUserData(chatId, data) {
     allUsers[chatId] = data;
     saveAllData(allUsers);
+}
+
+function getBaseUrl(chatId) {
+    const data = getUserData(chatId);
+    if (data.platform === 'BIGWIN') {
+        return PLATFORMS.BIGWIN.baseUrl;
+    } else if (data.platform === 'CKLOTTERY') {
+        return PLATFORMS.CKLOTTERY.baseUrl;
+    }
+    return PLATFORMS.BIGWIN.baseUrl; // default
 }
 
 // ========== KELLY CRITERION ==========
@@ -790,7 +819,10 @@ function getVipSignalMessage(chatId, userData, pattern, aiPrediction, nextIssue)
     let sideEmoji = betSide === "Big" ? "🔵" : "🔴";
     let sideText = betSide === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)";
     
-    let msg = `🎯 *တကွက်ကောင်း VIP SIGNAL* ${priorityEmoji}\n`;
+    let platformName = userData.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
+    let platformEmoji = userData.platform === 'BIGWIN' ? '🔥' : '🎯';
+    
+    let msg = `${platformEmoji} *${platformName} - VIP SIGNAL* ${priorityEmoji}\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `👑 *${nickname}*\n`;
     msg += `🕐 *အချိန်:* ${mmTime}\n`;
@@ -814,8 +846,9 @@ function getVipSignalMessage(chatId, userData, pattern, aiPrediction, nextIssue)
 async function checkBalance(chatId) {
     const data = getUserData(chatId);
     if (!data || !data.token) return null;
+    const baseUrl = getBaseUrl(chatId);
     try {
-        const res = await callApi("GetUserInfo", {}, data.token);
+        const res = await callApi(chatId, "GetUserInfo", {}, data.token);
         if (res?.msgCode === 0 && res.data) {
             const balance = res.data.amount
                 || res.data.balance
@@ -890,6 +923,7 @@ async function sendBetResultToUser(chatId, userData, betDetail) {
         const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' });
         const userDisplay = userData.username ? `95****${userData.username.slice(-3)}` : `User: ***`;
         const nickname = userData.nickname || userDisplay;
+        const platformName = userData.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
 
         addToPublicHistory({
             issue: betDetail.issue,
@@ -904,7 +938,7 @@ async function sendBetResultToUser(chatId, userData, betDetail) {
         const resultText = betDetail.status === "✅ WIN" ? "✅ အောင်မြင်ပါသည်" : "❌ ရှုံးနိမ့်ပါသည်";
         const pnlText = betDetail.pnl >= 0 ? `+${betDetail.pnl.toFixed(2)}` : `${betDetail.pnl.toFixed(2)}`;
 
-        let msg = `📊 *WinGo Pro - အသေးစိတ်အစီရင်ခံစာ*\n`;
+        let msg = `📊 *${platformName} Pro - အသေးစိတ်အစီရင်ခံစာ*\n`;
         msg += `━━━━━━━━━━━━━━━━━━━━\n`;
         msg += `🕐 *အချိန်:* ${now}\n`;
         msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
@@ -959,12 +993,17 @@ function signMd5(payload) {
     return crypto.createHash('md5').update(jsonStr, 'utf8').digest('hex').toUpperCase();
 }
 
-async function callApi(endpoint, data, authToken = null) {
-    const payload = { ...data, language: 7, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
+async function callApi(chatId, endpoint, data, authToken = null) {
+    const userData = getUserData(chatId);
+    const baseUrl = getBaseUrl(chatId);
+    const payload = { ...data, language: 0, random: generateRandomKey(), timestamp: Math.floor(Date.now() / 1000) };
     payload.signature = signMd5(payload);
-    const headers = { "Content-Type": "application/json;charset=UTF-8", "Authorization": authToken || "" };
+    const headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "Authorization": authToken || userData.token || ""
+    };
     try {
-        const res = await axios.post(`${BASE_URL}${endpoint}`, payload, { headers, timeout: 8000 });
+        const res = await axios.post(`${baseUrl}${endpoint}`, payload, { headers, timeout: 8000 });
         return res.data;
     } catch (e) {
         return null;
@@ -1352,6 +1391,8 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
         }
 
         const nickname = userData.nickname || `User ${chatId.slice(-3)}`;
+        const platformName = userData.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
+        const platformEmoji = userData.platform === 'BIGWIN' ? '🔥' : '🎯';
         const streakCount = streakData.streakCount;
         const startIssue = streakData.startIssue;
         const endIssue = streakData.endIssue;
@@ -1378,7 +1419,7 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
         let msg = '';
         
         if (isRecovery && streakCount === 1) {
-            msg = `🟢 *AI ပြန်မှန်ချိန် အသိပေးချက်*\n`;
+            msg = `🟢 *${platformEmoji} ${platformName} - AI ပြန်မှန်ချိန်*\n`;
             msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
             msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
             msg += `✅ *AI ပြန်မှန်ပါပြီ!*\n`;
@@ -1407,7 +1448,7 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
         }
 
         if (streakCount === 1) {
-            msg = `🟡 *အမှားဆက် စတင်ချိန် အသိပေးချက်*\n`;
+            msg = `🟡 *${platformEmoji} ${platformName} - အမှားဆက် စတင်ချိန်*\n`;
             msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
             msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
             msg += `❌ *၁ ပွဲမှားပါပြီ!*\n`;
@@ -1435,7 +1476,7 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
             return;
         }
 
-        msg = `🔴 *အမှားဆက် အသိပေးချက်*\n`;
+        msg = `🔴 *${platformEmoji} ${platformName} - အမှားဆက် အသိပေးချက်*\n`;
         msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         msg += `👤 *အသုံးပြုသူ:* ${nickname}\n`;
         msg += `📊 *အမှားဆက်အရေအတွက်:* ${streakCount} ပွဲ\n`;
@@ -1483,7 +1524,7 @@ async function sendLossStreakNotification(chatId, userData, streakData) {
     }
 }
 
-// ========== SEND STATUS NOTIFICATION TO STATUS BOT ==========
+// ========== SEND STATUS NOTIFICATION ==========
 async function sendStatusNotification(chatId, userData) {
     try {
         if (!statusBotUsers.users.includes(chatId)) {
@@ -1495,6 +1536,8 @@ async function sendStatusNotification(chatId, userData) {
         }
 
         const nickname = userData.nickname || `User ${chatId.slice(-3)}`;
+        const platformName = userData.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
+        const platformEmoji = userData.platform === 'BIGWIN' ? '🔥' : '🎯';
         let mode = userData.autoRunning ? userData.autoMode : "Manual";
         let modeEmoji = getModeEmoji(mode);
         const lossStreak = formatLossStreakShort(userData.aiLogs);
@@ -1503,7 +1546,7 @@ async function sendStatusNotification(chatId, userData) {
         const currentStep = (userData.currentBetStep || 0) + 1;
         const totalSteps = userData.betPlan?.length || 1;
         
-        let statusMsg = `📊 *${nickname} - Status*\n`;
+        let statusMsg = `📊 *${platformEmoji} ${platformName} - ${nickname} Status*\n`;
         statusMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         statusMsg += `${modeEmoji} *Mode:* ${mode}\n`;
         statusMsg += `📋 *Bet Plan:* ${betPlanDisplay}\n`;
@@ -1538,7 +1581,7 @@ async function sendStatusNotification(chatId, userData) {
 
 async function getNextIssue(chatId, token) {
     try {
-        const historyRes = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, token);
+        const historyRes = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 1, typeId: 30 }, token);
         if (historyRes?.data?.list?.length > 0) {
             return (BigInt(historyRes.data.list[0].issueNumber) + 1n).toString();
         }
@@ -1551,7 +1594,7 @@ async function waitForBetWindow(chatId, expectedIssue) {
     const startTime = Date.now();
     let issueStarted = false;
     while (Date.now() - startTime < 4000) {
-        const res = await callApi("GetGameIssue", { typeId: 30 }, data.token);
+        const res = await callApi(chatId, "GetGameIssue", { typeId: 30 }, data.token);
         if (res?.msgCode === 0 && res.data?.issueNumber === expectedIssue) {
             issueStarted = true;
             break;
@@ -1560,14 +1603,14 @@ async function waitForBetWindow(chatId, expectedIssue) {
     }
     if (!issueStarted) return false;
     await new Promise(r => setTimeout(r, 5000));
-    const checkRes = await callApi("GetGameIssue", { typeId: 30 }, data.token);
+    const checkRes = await callApi(chatId, "GetGameIssue", { typeId: 30 }, data.token);
     return checkRes?.msgCode === 0 && checkRes.data?.issueNumber === expectedIssue;
 }
 
 async function syncBetHistoryFromAPI(chatId) {
     const data = getUserData(chatId);
     if (!data || !data.token) return;
-    const res = await callApi("GetMyEmerdList", { typeId: 30, pageNo: 1, pageSize: 30 }, data.token);
+    const res = await callApi(chatId, "GetMyEmerdList", { typeId: 30, pageNo: 1, pageSize: 30 }, data.token);
     if (res?.msgCode === 0 && res.data?.list) {
         res.data.list.forEach(apiBet => {
             const issueShort = apiBet.issueNumber.slice(-5);
@@ -1602,8 +1645,8 @@ async function syncBetHistoryFromAPI(chatId) {
 
 async function getEmerdListPrediction(chatId, token) {
     try {
-        const statsRes = await callApi("GetEmerdList", { typeId: 30, gameType: 2 }, token);
-        const historyRes = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, token);
+        const statsRes = await callApi(chatId, "GetEmerdList", { typeId: 30, gameType: 2 }, token);
+        const historyRes = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 50, typeId: 30 }, token);
         if (statsRes?.msgCode === 0 && historyRes?.msgCode === 0) {
             const freqData = statsRes.data.find(d => d.type === 1);
             const missingData = statsRes.data.find(d => d.type === 2);
@@ -1818,7 +1861,7 @@ async function placeBetNow(chatId, side, amount, targetIssue, stepIndex, isAuto 
         isAgree: true
     };
 
-    const res = await callApi("GameBetting", betPayload, data.token);
+    const res = await callApi(chatId, "GameBetting", betPayload, data.token);
     data.bettingInProgress = null;
 
     if (res?.msgCode === 0 || res?.msg === "Bet success") {
@@ -1865,7 +1908,7 @@ async function monitoringLoop(chatId) {
         try {
             await syncBetHistoryFromAPI(chatId);
             data = getUserData(chatId);
-            const res = await callApi("GetNoaverageEmerdList", { pageNo: 1, pageSize: 5, typeId: 30 }, data.token);
+            const res = await callApi(chatId, "GetNoaverageEmerdList", { pageNo: 1, pageSize: 5, typeId: 30 }, data.token);
             if (res?.msgCode === 0 && res.data?.list?.length > 0) {
                 const history = res.data.list;
                 const lastRound = history[0];
@@ -2117,9 +2160,9 @@ async function monitoringLoop(chatId) {
 
                     previousLossStreak = currentLossStreak;
 
-                    // ========== SEND STATUS NOTIFICATION (every 5 minutes) ==========
+                    // ========== SEND STATUS NOTIFICATION ==========
                     const now = Date.now();
-                    if (!lastStatusSent || (now - lastStatusSent) > 300000) { // 5 minutes
+                    if (!lastStatusSent || (now - lastStatusSent) > 300000) {
                         await sendStatusNotification(chatId, data);
                         lastStatusSent = now;
                     }
@@ -2249,7 +2292,10 @@ async function monitoringLoop(chatId) {
                         else if (data.autoMode === 'ensemble') modeText = "🧠 Ensemble Ultra";
                     }
 
-                    let statusMsg = `💥 *${nickname} - VIP SIGNAL* 💥\n`;
+                    const platformName = data.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
+                    const platformEmoji = data.platform === 'BIGWIN' ? '🔥' : '🎯';
+
+                    let statusMsg = `💥 *${platformEmoji} ${platformName} - ${nickname} VIP SIGNAL* 💥\n`;
                     statusMsg += `━━━━━━━━━━━━━━━━\n`;
                     statusMsg += `🗓 Period: ${currentIssue}\n`;
                     statusMsg += `🎲 Result: ${realSide} (${realNumber})\n`;
@@ -2348,15 +2394,28 @@ const autoModeMenu = {
     }
 };
 
+const platformMenu = {
+    reply_markup: {
+        keyboard: [
+            ["🔥 BigWin"],
+            ["🎯 CK Lottery"],
+            ["🔙 Back"]
+        ],
+        resize_keyboard: true
+    }
+};
+
 // ========== MESSAGE HANDLER ==========
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id.toString();
     const text = msg.text;
     let data = getUserData(chatId);
 
+    // ========== PLATFORM SELECTION ==========
     if (text === '/start') {
         data.running = false;
         data.token = null;
+        data.platform = null;
         data.autoRunning = false;
         data.manualBetLock = false;
         data.sessionWins = 0;
@@ -2387,44 +2446,126 @@ bot.on('message', async (msg) => {
         delete data.tempPhone;
         delete data.pendingSide;
         delete data.username;
+        delete data.nickname;
         saveUserData(chatId, data);
 
-        if (!lossBotUsers.users.includes(chatId)) {
-            lossBotUsers.users.push(chatId);
-            saveLossBotUsers(lossBotUsers);
-            try {
-                await lossBot.sendMessage(chatId, `✅ သင့်အား အမှားဆက် အသိပေးချက်များ ပို့ရန် စာရင်းသွင်းပြီးပါပြီ။`);
-            } catch (e) {}
-        }
-
-        if (!statusBotUsers.users.includes(chatId)) {
-            statusBotUsers.users.push(chatId);
-            saveStatusBotUsers(statusBotUsers);
-            try {
-                await statusBot.sendMessage(chatId, `✅ သင့်အား Status အသိပေးချက်များ ပို့ရန် စာရင်းသွင်းပြီးပါပြီ။\n📊 ၅ မိနစ်တစ်ကြိမ် အသိပေးပါမည်။`);
-            } catch (e) {}
-        }
-
-        let welcomeMsg = `🎯 *WinGo Sniper Pro v4.1* 🎯\n`;
+        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot*\n━━━━━━━━━━━━━━━━\n`;
+        welcomeMsg += `ကျေးဇူးပြု၍ Platform ရွေးချယ်ပါ:\n\n`;
+        welcomeMsg += `🔥 *BigWin* - WinGo 30 Sec Game\n`;
+        welcomeMsg += `🎯 *CK Lottery* - CK Lottery 30 Sec Game\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
-        welcomeMsg += `⏰ 30 Sec Game - Ensemble AI\n`;
-        welcomeMsg += `🧠 *Mode 8 မျိုး:*\n`;
-        welcomeMsg += `  🔄 Follow\n  🔃 Reverse\n  🤖 AI Correction\n  🧠 GetEmerdList\n  🧬 Smart Hybrid\n  🧠 AI Brain\n  🧠 Cautious Brain (Markov)\n`;
-        welcomeMsg += `  🧠 *Ensemble Ultra (8-in-1)* ← အသစ်!\n`;
-        welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
-        welcomeMsg += `🎯 *VIP Signal System* - Pattern Detection\n`;
-        welcomeMsg += `📊 *Kelly Criterion* - Smart Bet Sizing (Min: Bet Plan)\n`;
-        welcomeMsg += `🧬 *Ensemble AI* - 8 Methods Combined\n`;
-        welcomeMsg += `📊 *Loss Streak Stats* - အမှားဆက်စာရင်းအင်း\n`;
-        welcomeMsg += `📊 *Loss Bot* - အမှားဆက် ၁ပွဲမှစ၍ အသိပေး\n`;
-        welcomeMsg += `📊 *Status Bot* - ၅မိနစ်တစ်ကြိမ် Status အသိပေး\n`;
-        welcomeMsg += `━━━━━━━━━━━━━━━━\n\n`;
-        welcomeMsg += `ဖုန်းနံပါတ်ပေးပါ (သို့) Global Dashboard ကြည့်ပါ:`;
+        welcomeMsg += `ရွေးချယ်ပြီးပါက Login ဝင်ပါ။`;
 
-        await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown" });
-        return bot.sendMessage(chatId, "🔐 ဆက်လက်အသုံးပြုရန် ဖုန်းနံပါတ်ပေးပါ:", mainMenu);
+        await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown", ...platformMenu });
+        return;
     }
 
+    if (text === '🔥 BigWin') {
+        data.platform = 'BIGWIN';
+        data.running = false;
+        data.token = null;
+        data.autoRunning = false;
+        data.manualBetLock = false;
+        data.sessionWins = 0;
+        data.totalWins = 0;
+        data.betHistory = [];
+        data.aiLogs = [];
+        data.totalProfit = 0;
+        data.currentBalance = 0;
+        data.brainStats = {
+            totalPredictions: 0,
+            correctPredictions: 0,
+            modePerformance: {
+                follow: { wins: 0, losses: 0 },
+                reverse: { wins: 0, losses: 0 },
+                ai_correction: { wins: 0, losses: 0 },
+                emerdlist: { wins: 0, losses: 0 },
+                hybrid: { wins: 0, losses: 0 },
+                cautious: { wins: 0, losses: 0 },
+                ensemble: { wins: 0, losses: 0 }
+            },
+            currentBestMode: null,
+            lastModeSwitch: null,
+            consecutiveModeFailures: 0
+        };
+        delete data.settingMode;
+        delete data.tempPhone;
+        delete data.pendingSide;
+        delete data.username;
+        delete data.nickname;
+        saveUserData(chatId, data);
+
+        await bot.sendMessage(chatId, `🔥 *BigWin Platform ရွေးချယ်ပြီးပါပြီ!*\n━━━━━━━━━━━━━━━━\n🔐 ဆက်လက်အသုံးပြုရန် ဖုန်းနံပါတ်ပေးပါ:`, mainMenu);
+        return;
+    }
+
+    if (text === '🎯 CK Lottery') {
+        data.platform = 'CKLOTTERY';
+        data.running = false;
+        data.token = null;
+        data.autoRunning = false;
+        data.manualBetLock = false;
+        data.sessionWins = 0;
+        data.totalWins = 0;
+        data.betHistory = [];
+        data.aiLogs = [];
+        data.totalProfit = 0;
+        data.currentBalance = 0;
+        data.brainStats = {
+            totalPredictions: 0,
+            correctPredictions: 0,
+            modePerformance: {
+                follow: { wins: 0, losses: 0 },
+                reverse: { wins: 0, losses: 0 },
+                ai_correction: { wins: 0, losses: 0 },
+                emerdlist: { wins: 0, losses: 0 },
+                hybrid: { wins: 0, losses: 0 },
+                cautious: { wins: 0, losses: 0 },
+                ensemble: { wins: 0, losses: 0 }
+            },
+            currentBestMode: null,
+            lastModeSwitch: null,
+            consecutiveModeFailures: 0
+        };
+        delete data.settingMode;
+        delete data.tempPhone;
+        delete data.pendingSide;
+        delete data.username;
+        delete data.nickname;
+        saveUserData(chatId, data);
+
+        await bot.sendMessage(chatId, `🎯 *CK Lottery Platform ရွေးချယ်ပြီးပါပြီ!*\n━━━━━━━━━━━━━━━━\n🔐 ဆက်လက်အသုံးပြုရန် ဖုန်းနံပါတ်ပေးပါ:`, mainMenu);
+        return;
+    }
+
+    if (text === '🔙 Back') {
+        data.platform = null;
+        saveUserData(chatId, data);
+        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot*\n━━━━━━━━━━━━━━━━\n`;
+        welcomeMsg += `ကျေးဇူးပြု၍ Platform ရွေးချယ်ပါ:\n\n`;
+        welcomeMsg += `🔥 *BigWin* - WinGo 30 Sec Game\n`;
+        welcomeMsg += `🎯 *CK Lottery* - CK Lottery 30 Sec Game\n`;
+        welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
+        welcomeMsg += `ရွေးချယ်ပြီးပါက Login ဝင်ပါ။`;
+
+        await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown", ...platformMenu });
+        return;
+    }
+
+    // ========== CHECK PLATFORM SELECTED ==========
+    if (!data.platform && text !== '/start' && text !== '🔥 BigWin' && text !== '🎯 CK Lottery' && text !== '🔙 Back') {
+        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot*\n━━━━━━━━━━━━━━━━\n`;
+        welcomeMsg += `ကျေးဇူးပြု၍ Platform ရွေးချယ်ပါ:\n\n`;
+        welcomeMsg += `🔥 *BigWin* - WinGo 30 Sec Game\n`;
+        welcomeMsg += `🎯 *CK Lottery* - CK Lottery 30 Sec Game\n`;
+        welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
+        welcomeMsg += `ရွေးချယ်ပြီးပါက Login ဝင်ပါ။`;
+
+        await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown", ...platformMenu });
+        return;
+    }
+
+    // ========== NORMAL BOT COMMANDS ==========
     if (text === "🧬 Ensemble Weights") {
         try {
             const weights = ensemblePredictor.weights || loadEnsembleWeights();
@@ -2761,16 +2902,18 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "👋 အကောင့်ထွက်ပြီးပါပြီ။ /start ဖြင့် ပြန်ဝင်ပါ။");
     }
 
+    // ========== PHONE NUMBER INPUT ==========
     if (/^\d{9,11}$/.test(text) && !data.token) {
         data.tempPhone = text;
         saveUserData(chatId, data);
         return bot.sendMessage(chatId, "🔐 Password ပေးပါ:");
     }
 
+    // ========== PASSWORD INPUT ==========
     if (data.tempPhone && !data.token) {
-        const username = "95" + data.tempPhone.replace(/^0/, '');
+        const username = data.tempPhone.startsWith('09') ? '95' + data.tempPhone.slice(2) : data.tempPhone;
         await bot.sendMessage(chatId, "⏳ အကောင့်ဝင်နေပါသည်...");
-        const res = await callApi("Login", { phonetype: -1, logintype: "mobile", username, pwd: text });
+        const res = await callApi(chatId, "Login", { phonetype: -1, logintype: "mobile", username, pwd: text });
         if (res?.msgCode === 0) {
             data.token = res.data.tokenHeader + " " + res.data.token;
             data.running = true;
@@ -2782,7 +2925,11 @@ bot.on('message', async (msg) => {
             await checkBalance(chatId);
             data = getUserData(chatId);
             monitoringLoop(chatId);
-            await bot.sendMessage(chatId, `✅ Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\nSignal များ User သို့သာ ပို့ပါမည်။\n🎯 VIP Signal System: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}\n🧬 Ensemble Ultra: Available in Auto Mode\n📊 Loss Streak Stats: Available in Menu\n📊 Status Bot: ၅မိနစ်တစ်ကြိမ် အသိပေးမည်`, mainMenu);
+            
+            const platformName = data.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
+            const platformEmoji = data.platform === 'BIGWIN' ? '🔥' : '🎯';
+            
+            await bot.sendMessage(chatId, `✅ ${platformEmoji} ${platformName} Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\nSignal များ User သို့သာ ပို့ပါမည်။\n🎯 VIP Signal System: ${data.vipSignalsEnabled ? '🟢 ON' : '🔴 OFF'}\n🧬 Ensemble Ultra: Available in Auto Mode\n📊 Loss Streak Stats: Available in Menu`, mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed! နံပါတ်နှင့် Password ပြန်စစ်ပါ။");
             delete data.tempPhone;
@@ -2832,10 +2979,13 @@ bot.on('callback_query', async (query) => {
 // ========== HELP COMMAND ==========
 bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id.toString();
-    let helpText = `📖 *WinGo Pro Bot v4.1 - Ensemble Ultra*\n━━━━━━━━━━━━━━━━\n\n🤖 *Auto Modes (8 Modes)*\n`;
+    let helpText = `📖 *WinGo Pro Bot v4.1 - Multi-Platform*\n━━━━━━━━━━━━━━━━\n\n🤖 *Supported Platforms:*\n`;
+    helpText += `• 🔥 BigWin - WinGo 30 Sec Game\n`;
+    helpText += `• 🎯 CK Lottery - CK Lottery 30 Sec Game\n`;
+    helpText += `\n🤖 *Auto Modes (8 Modes)*\n`;
     helpText += `• 🔄 Follow - နောက်ဆုံးပွဲအတိုင်း\n• 🔃 Reverse - ပြောင်းပြန်ထိုး\n• 🤖 AI Correction - AI မှားချိန်မှထိုး\n• 🧠 GetEmerdList - Hot/Cold+Trend\n• 🧬 Smart Hybrid - AI+Website ပေါင်း\n• 🧠 AI Brain - Master Decision\n• 🧠 Cautious Brain - Markov Chain + AI\n• 🧠 *Ensemble Ultra* - 8 Methods Combined!\n`;
     helpText += `\n🧬 *Ensemble Ultra Features:*\n• Multi-Timeframe Analysis\n• Weighted Voting (7 modes)\n• Pattern Matching Engine\n• Monte Carlo Simulation\n• Anomaly Detection\n• Markov Chain Prediction\n• AI Brain + Hybrid\n• Kelly Criterion (Min: Bet Plan)\n• Auto Weight Adjustment\n`;
-    helpText += `\n📊 *Loss Streak Stats (NEW!):*\n• အမှားဆက် (၂ ပွဲအထက်) အားလုံးကို စာရင်းပြုစုထားပါသည်။\n• အမှားဆက်အလိုက် အကြိမ်အရေအတွက်၊ ပျမ်းမျှကြာချိန်၊ ပျမ်းမျှကြားပွဲများကို ဇယားဖြင့်ဖော်ပြထားပါသည်။\n• အသေးစိတ် အားလုံးကိုလည်း ဖော်ပြထားပါသည်။\n• Menu မှ "📊 Loss Streak Stats" ကိုနှိပ်၍ ကြည့်ရှုနိုင်ပါသည်။\n`;
+    helpText += `\n📊 *Loss Streak Stats:*\n• အမှားဆက် (၂ ပွဲအထက်) အားလုံးကို စာရင်းပြုစုထားပါသည်။\n• အမှားဆက်အလိုက် အကြိမ်အရေအတွက်၊ ပျမ်းမျှကြာချိန်၊ ပျမ်းမျှကြားပွဲများကို ဇယားဖြင့်ဖော်ပြထားပါသည်။\n• Menu မှ "📊 Loss Streak Stats" ကိုနှိပ်၍ ကြည့်ရှုနိုင်ပါသည်။\n`;
     await bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
 });
 
@@ -2926,20 +3076,17 @@ http.createServer((req, res) => {
         });
     } else {
         res.writeHead(200);
-        res.end('WinGo Pro Bot v4.1 - Ensemble Ultra AI + Loss Streak Stats');
+        res.end('WinGo Pro Bot v4.1 - Multi-Platform');
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🧬 Ensemble Ultra AI: ACTIVE`);
     console.log(`🎯 VIP Signal System: READY`);
     console.log(`📊 Kelly Criterion: ENABLED (Min: Bet Plan, Min: 10 MMK)`);
-    console.log(`🔧 Ensemble Weights Bug: FIXED`);
-    console.log(`📊 Loss Streak Stats: ACTIVE (v4.1)`);
+    console.log(`📊 Loss Streak Stats: ACTIVE`);
     console.log(`📊 Loss Bot Token: ${LOSS_BOT_TOKEN}`);
     console.log(`📊 Status Bot Token: ${STATUS_BOT_TOKEN}`);
-    console.log(`📊 Loss Bot Users: ${lossBotUsers.users.length}`);
-    console.log(`📊 Status Bot Users: ${statusBotUsers.users.length}`);
-    console.log(`📊 Status Bot: 5 minutes interval`);
+    console.log(`📊 Multi-Platform: BigWin + CK Lottery`);
 });
 
-console.log("✅ WinGo Pro Bot v4.1 - All Bugs Fixed + Loss Streak Stats + Loss Bot + Status Bot");
+console.log("✅ WinGo Pro Bot v4.1 - Multi-Platform Ready");
