@@ -47,6 +47,41 @@ statusBot.on('message', async (msg) => {
     }
 });
 
+// ========== MODE BOTS ==========
+const MODE_BOTS = {
+    SMART_HYBRID: {
+        token: '7937876293:AAFdSjLbEqt2M0rzxdRD89O82J601yNiOUE',
+        name: '🧬 Smart Hybrid'
+    },
+    BIG_STREAK_FOLLOW: {
+        token: '8759569643:AAG-8k02ukDseE-RVXO5m9Mwi7sSk4qmp4o',
+        name: '🔥 Big Streak Follow'
+    },
+    PATTERN_RECOVERY: {
+        token: '8828724093:AAHXadgT_RVgpfDo4HoLvX1eUllCkjWUyJ0',
+        name: '🧠 Pattern Recovery'
+    },
+    LOSS_STREAK_FOLLOW: {
+        token: '8642114694:AAEtzYO9swIbjMvXymOe6rDgQcltp2inNqE',
+        name: '📉 Loss Streak Follow'
+    },
+    WIN_STREAK_REVERSE: {
+        token: '8444764459:AAGr-Y2Zn5Sl7bQsr_QJS5wTWXAuIJ8b_eU',
+        name: '📈 Win Streak Reverse'
+    }
+};
+
+// Create mode bots
+const modeBots = {};
+Object.keys(MODE_BOTS).forEach(key => {
+    const config = MODE_BOTS[key];
+    const modeBot = new TelegramBot(config.token);
+    modeBot.setWebHook(`${APP_URL}/modebot${config.token}`).then(() => {
+        console.log(`✅ ${config.name} Bot Webhook set`);
+    }).catch(e => console.error(`${config.name} Bot Webhook error:`, e.message));
+    modeBots[key] = modeBot;
+});
+
 // ========== LOCAL STORAGE ==========
 const DATA_FILE = path.join(__dirname, 'user_data.json');
 const PUBLIC_DATA_FILE = path.join(__dirname, 'public_data.json');
@@ -271,9 +306,12 @@ function getUserData(chatId) {
             smallStreakCount: 0,
             lastBigStreakReset: null,
             lastSmallStreakReset: null,
-            // Pattern memory update tracking
             patternLastUpdate: null,
             patternAccuracy: 0,
+            lossStreakCounter: 0,
+            winStreakCounter: 0,
+            lossStreakFollowCount: 0,
+            winStreakReverseCount: 0,
             brainStats: {
                 totalPredictions: 0,
                 correctPredictions: 0,
@@ -287,7 +325,9 @@ function getUserData(chatId) {
                     ensemble: { wins: 0, losses: 0 },
                     ai_correction2: { wins: 0, losses: 0 },
                     big_streak_follow: { wins: 0, losses: 0 },
-                    pattern_recovery: { wins: 0, losses: 0 }
+                    pattern_recovery: { wins: 0, losses: 0 },
+                    loss_streak_follow: { wins: 0, losses: 0 },
+                    win_streak_reverse: { wins: 0, losses: 0 }
                 },
                 currentBestMode: null,
                 lastModeSwitch: null,
@@ -310,7 +350,9 @@ function getUserData(chatId) {
                 ensemble: { wins: 0, losses: 0 },
                 ai_correction2: { wins: 0, losses: 0 },
                 big_streak_follow: { wins: 0, losses: 0 },
-                pattern_recovery: { wins: 0, losses: 0 }
+                pattern_recovery: { wins: 0, losses: 0 },
+                loss_streak_follow: { wins: 0, losses: 0 },
+                win_streak_reverse: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -325,6 +367,12 @@ function getUserData(chatId) {
     }
     if (!allUsers[chatId].brainStats.modePerformance.pattern_recovery) {
         allUsers[chatId].brainStats.modePerformance.pattern_recovery = { wins: 0, losses: 0 };
+    }
+    if (!allUsers[chatId].brainStats.modePerformance.loss_streak_follow) {
+        allUsers[chatId].brainStats.modePerformance.loss_streak_follow = { wins: 0, losses: 0 };
+    }
+    if (!allUsers[chatId].brainStats.modePerformance.win_streak_reverse) {
+        allUsers[chatId].brainStats.modePerformance.win_streak_reverse = { wins: 0, losses: 0 };
     }
     if (allUsers[chatId].vipSignalsEnabled === undefined) {
         allUsers[chatId].vipSignalsEnabled = true;
@@ -961,6 +1009,8 @@ async function sendBetResultToUser(chatId, userData, betDetail) {
             else if (modeName === 'ai_correction2') modeName = '🤖 AI Correction 2';
             else if (modeName === 'big_streak_follow') modeName = '🔥 Big Streak Follow';
             else if (modeName === 'pattern_recovery') modeName = '🧠 Pattern Recovery';
+            else if (modeName === 'loss_streak_follow') modeName = '📉 Loss Streak Follow';
+            else if (modeName === 'win_streak_reverse') modeName = '📈 Win Streak Reverse';
             msg += `🤖 *Auto Mode:* ${modeName}\n`;
             msg += `📋 *ထိုးအဆင့်:* ${(userData.currentBetStep || 0) + 1}/${userData.betPlan.length}\n`;
         }
@@ -1026,6 +1076,49 @@ function runAI(history) {
     return { side: prediction || "Big", dragon: streak };
 }
 
+// ========== SEND TO MODE BOTS ==========
+async function sendToModeBots(chatId, userData, modeName, prediction, confidence, reason, details) {
+    const modeKeys = {
+        '🧬 Smart Hybrid': 'SMART_HYBRID',
+        '🔥 Big Streak Follow': 'BIG_STREAK_FOLLOW',
+        '🧠 Pattern Recovery': 'PATTERN_RECOVERY',
+        '📉 Loss Streak Follow': 'LOSS_STREAK_FOLLOW',
+        '📈 Win Streak Reverse': 'WIN_STREAK_REVERSE'
+    };
+    
+    const key = modeKeys[modeName];
+    if (!key || !modeBots[key]) return;
+    
+    const botInstance = modeBots[key];
+    const nickname = userData.nickname || `User ${chatId.slice(-3)}`;
+    const platformName = userData.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
+    const platformEmoji = userData.platform === 'BIGWIN' ? '🔥' : '🎯';
+    const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' });
+    
+    let msg = `💥 ${platformEmoji} *${platformName} - ${nickname} ${modeName}* 💥\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🤖 *AI Pred:* ${prediction}\n`;
+    msg += `📈 *Confidence:* ${confidence}%\n`;
+    msg += `📝 *Reason:* ${reason}\n`;
+    if (details) {
+        msg += `📊 *Details:* ${details}\n`;
+    }
+    msg += `💰 *Profit:* ${(userData.totalProfit || 0).toFixed(2)} MMK\n`;
+    msg += `🏦 *Balance:* ${(userData.currentBalance || 0).toFixed(2)} MMK\n`;
+    msg += `📉 *Loss Streak:* ${userData.consecutiveLosses || 0} ပွဲ\n`;
+    msg += `🔥 *Big Streak:* ${userData.bigStreakCount || 0} ပွဲ\n`;
+    msg += `🌄 *Small Streak:* ${userData.smallStreakCount || 0} ပွဲ\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🕐 *အချိန်:* ${now}`;
+    
+    try {
+        await botInstance.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        console.log(`✅ Sent to ${modeName} Bot for ${chatId}`);
+    } catch (e) {
+        console.error(`${modeName} Bot error:`, e.message);
+    }
+}
+
 // ========== PATTERN MEMORY ANALYZER ==========
 function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
     if (!patternMemory[chatId]) {
@@ -1043,7 +1136,6 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
     const mem = patternMemory[chatId];
     const aiCorrect = aiSide === realSide;
     
-    // Update streak counts
     if (realSide === "Big") {
         userData.bigStreakCount = (userData.bigStreakCount || 0) + 1;
         userData.smallStreakCount = 0;
@@ -1052,7 +1144,14 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
         userData.bigStreakCount = 0;
     }
     
-    // Record pattern from website directly
+    if (!aiCorrect) {
+        userData.lossStreakCounter = (userData.lossStreakCounter || 0) + 1;
+        userData.winStreakCounter = 0;
+    } else {
+        userData.winStreakCounter = (userData.winStreakCounter || 0) + 1;
+        userData.lossStreakCounter = 0;
+    }
+    
     const pattern = {
         time: new Date().toISOString(),
         issue: userData.last_issue ? userData.last_issue.slice(-5) : '',
@@ -1063,10 +1162,11 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
         bigStreak: userData.bigStreakCount || 0,
         smallStreak: userData.smallStreakCount || 0,
         aiLossStreak: userData.consecutiveLosses || 0,
-        websiteStreak: 0
+        websiteStreak: 0,
+        lossStreakCounter: userData.lossStreakCounter || 0,
+        winStreakCounter: userData.winStreakCounter || 0
     };
     
-    // Calculate website streak from pattern
     if (mem.patterns.length > 0) {
         const lastPattern = mem.patterns[mem.patterns.length - 1];
         if (lastPattern.realSide === realSide) {
@@ -1083,7 +1183,6 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
         mem.patterns = mem.patterns.slice(-500);
     }
     
-    // Update pattern accuracy
     const recentPatterns = mem.patterns.slice(-100);
     const correctCount = recentPatterns.filter(p => p.aiCorrect).length;
     mem.patternAccuracy = recentPatterns.length > 0 ? (correctCount / recentPatterns.length) * 100 : 0;
@@ -1091,7 +1190,6 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
     userData.patternLastUpdate = mem.lastUpdate;
     userData.patternAccuracy = mem.patternAccuracy;
     
-    // Track big streaks
     if (userData.bigStreakCount >= 3) {
         mem.bigStreakHistory.push({
             streak: userData.bigStreakCount,
@@ -1101,7 +1199,6 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
         if (mem.bigStreakHistory.length > 50) mem.bigStreakHistory = mem.bigStreakHistory.slice(-50);
     }
     
-    // Track small streaks
     if (userData.smallStreakCount >= 3) {
         mem.smallStreakHistory.push({
             streak: userData.smallStreakCount,
@@ -1111,7 +1208,6 @@ function updatePatternMemory(chatId, userData, realSide, realNumber, aiSide) {
         if (mem.smallStreakHistory.length > 50) mem.smallStreakHistory = mem.smallStreakHistory.slice(-50);
     }
     
-    // Track recovery patterns (after 5+ losses)
     if (userData.consecutiveLosses >= 5 && aiCorrect) {
         mem.recoveryPatterns.push({
             lossStreak: userData.consecutiveLosses,
@@ -1136,17 +1232,22 @@ function analyzePatternMemory(chatId) {
             confidence: 0,
             patternAccuracy: 0,
             totalPatterns: 0,
-            lastUpdate: null
+            lastUpdate: null,
+            lossStreakAvg: 0,
+            winStreakAvg: 0
         };
     }
     
     const recent500 = mem.patterns.slice(-500);
     
-    // Calculate average streak lengths
     let totalBigStreak = 0;
     let totalSmallStreak = 0;
     let bigStreakCount = 0;
     let smallStreakCount = 0;
+    let totalLossStreak = 0;
+    let totalWinStreak = 0;
+    let lossStreakCount = 0;
+    let winStreakCount = 0;
     
     recent500.forEach(p => {
         if (p.bigStreak > 0) {
@@ -1157,12 +1258,21 @@ function analyzePatternMemory(chatId) {
             totalSmallStreak += p.smallStreak;
             smallStreakCount++;
         }
+        if (p.lossStreakCounter > 0) {
+            totalLossStreak += p.lossStreakCounter;
+            lossStreakCount++;
+        }
+        if (p.winStreakCounter > 0) {
+            totalWinStreak += p.winStreakCounter;
+            winStreakCount++;
+        }
     });
     
     const bigStreakAvg = bigStreakCount > 0 ? totalBigStreak / bigStreakCount : 0;
     const smallStreakAvg = smallStreakCount > 0 ? totalSmallStreak / smallStreakCount : 0;
+    const lossStreakAvg = lossStreakCount > 0 ? totalLossStreak / lossStreakCount : 0;
+    const winStreakAvg = winStreakCount > 0 ? totalWinStreak / winStreakCount : 0;
     
-    // Calculate recovery chance (after 5+ losses, how often AI recovers)
     let recoveryCount = 0;
     let recoveryTotal = 0;
     mem.recoveryPatterns.forEach(r => {
@@ -1171,7 +1281,6 @@ function analyzePatternMemory(chatId) {
     });
     const recoveryChance = recoveryTotal > 0 ? (recoveryCount / recoveryTotal) * 100 : 50;
     
-    // Predict next based on current streaks and pattern memory
     const lastPattern = recent500[recent500.length - 1];
     let nextPrediction = null;
     let confidence = 50;
@@ -1180,23 +1289,29 @@ function analyzePatternMemory(chatId) {
         const currentBigStreak = lastPattern.bigStreak || 0;
         const currentSmallStreak = lastPattern.smallStreak || 0;
         const currentWebsiteStreak = lastPattern.websiteStreak || 0;
+        const currentLossStreak = lastPattern.lossStreakCounter || 0;
+        const currentWinStreak = lastPattern.winStreakCounter || 0;
         
-        // If big streak is getting long, predict Small
-        if (currentBigStreak >= bigStreakAvg * 1.5 && currentBigStreak >= 3) {
+        if (currentLossStreak >= 9) {
+            nextPrediction = lastPattern.aiSide;
+            confidence = Math.min(60 + currentLossStreak * 2, 85);
+        }
+        else if (currentWinStreak >= 9) {
+            nextPrediction = lastPattern.aiSide === "Big" ? "Small" : "Big";
+            confidence = Math.min(60 + currentWinStreak * 2, 85);
+        }
+        else if (currentBigStreak >= bigStreakAvg * 1.5 && currentBigStreak >= 3) {
             nextPrediction = "Small";
             confidence = Math.min(60 + currentBigStreak * 5, 85);
         } 
-        // If small streak is getting long, predict Big
         else if (currentSmallStreak >= smallStreakAvg * 1.5 && currentSmallStreak >= 3) {
             nextPrediction = "Big";
             confidence = Math.min(60 + currentSmallStreak * 5, 85);
         }
-        // If AI has been losing a lot, predict recovery
         else if (lastPattern.aiLossStreak >= 5) {
             nextPrediction = lastPattern.aiSide;
             confidence = Math.min(65 + lastPattern.aiLossStreak * 3, 88);
         }
-        // If website streak is long, predict reverse
         else if (currentWebsiteStreak >= 4) {
             nextPrediction = lastPattern.realSide === "Big" ? "Small" : "Big";
             confidence = Math.min(60 + currentWebsiteStreak * 3, 80);
@@ -1211,16 +1326,16 @@ function analyzePatternMemory(chatId) {
         confidence: confidence,
         patternAccuracy: mem.patternAccuracy || 0,
         totalPatterns: recent500.length,
-        lastUpdate: mem.lastUpdate
+        lastUpdate: mem.lastUpdate,
+        lossStreakAvg: lossStreakAvg,
+        winStreakAvg: winStreakAvg
     };
 }
 
-// ========== AI PREDICTION SPLIT (2 PREDICTIONS) ==========
+// ========== AI PREDICTION SPLIT ==========
 function getDualPredictions(data, history, realSide, realNumber) {
-    // Prediction 1: Normal AI prediction
     const normalPred = runAI(history);
     
-    // Prediction 2: Pattern-based prediction
     const chatId = Object.keys(allUsers).find(k => allUsers[k] === data);
     const patternAnalysis = analyzePatternMemory(chatId);
     let patternPred = null;
@@ -1230,13 +1345,14 @@ function getDualPredictions(data, history, realSide, realNumber) {
             side: patternAnalysis.nextPrediction,
             confidence: patternAnalysis.confidence || 60,
             method: "Pattern Memory",
-            details: `BigStreakAvg:${patternAnalysis.bigStreakAvg.toFixed(1)} SmallStreakAvg:${patternAnalysis.smallStreakAvg.toFixed(1)} | Accuracy:${patternAnalysis.patternAccuracy.toFixed(0)}%`
+            details: `LossAvg:${patternAnalysis.lossStreakAvg.toFixed(1)} WinAvg:${patternAnalysis.winStreakAvg.toFixed(1)} | Acc:${patternAnalysis.patternAccuracy.toFixed(0)}%`
         };
     }
     
-    // Check if big streak follow mode is active
     const bigStreak = data.bigStreakCount || 0;
     const smallStreak = data.smallStreakCount || 0;
+    const lossStreakCounter = data.lossStreakCounter || 0;
+    const winStreakCounter = data.winStreakCounter || 0;
     
     let bigStreakPred = null;
     if (bigStreak >= 3) {
@@ -1255,10 +1371,33 @@ function getDualPredictions(data, history, realSide, realNumber) {
         };
     }
     
+    let lossStreakPred = null;
+    let winStreakPred = null;
+    
+    if (lossStreakCounter >= 9) {
+        lossStreakPred = {
+            side: data.last_pred || "Big",
+            confidence: Math.min(60 + lossStreakCounter * 2, 85),
+            method: "Loss Streak Follow",
+            details: `AI ${lossStreakCounter} ပွဲဆက်မှား → AI အတိုင်းထိုး`
+        };
+    }
+    
+    if (winStreakCounter >= 9) {
+        winStreakPred = {
+            side: data.last_pred === "Big" ? "Small" : "Big",
+            confidence: Math.min(60 + winStreakCounter * 2, 85),
+            method: "Win Streak Reverse",
+            details: `AI ${winStreakCounter} ပွဲဆက်မှန် → ပြောင်းပြန်ထိုး`
+        };
+    }
+    
     return {
         normal: normalPred,
         pattern: patternPred,
         bigStreak: bigStreakPred,
+        lossStreak: lossStreakPred,
+        winStreak: winStreakPred,
         patternAccuracy: patternAnalysis.patternAccuracy || 0,
         totalPatterns: patternAnalysis.totalPatterns || 0,
         lastUpdate: patternAnalysis.lastUpdate
@@ -1298,8 +1437,9 @@ function aiBrainDecide(data, history, realSide, realNumber) {
     const aiPrediction = data.last_pred || "Big";
     const bigStreak = data.bigStreakCount || 0;
     const smallStreak = data.smallStreakCount || 0;
+    const lossStreakCounter = data.lossStreakCounter || 0;
+    const winStreakCounter = data.winStreakCounter || 0;
     
-    // Check pattern memory for recovery signal
     const chatId = Object.keys(allUsers).find(k => allUsers[k] === data);
     const patternAnalysis = analyzePatternMemory(chatId);
     const patternRecovery = patternAnalysis && patternAnalysis.recoveryChance > 70 && currentLossStreak >= 3;
@@ -1307,8 +1447,15 @@ function aiBrainDecide(data, history, realSide, realNumber) {
     let finalSide = aiPrediction;
     let decisionReason = "";
 
-    // Big streak detection (5+ Big streak)
-    if (bigStreak >= 5) {
+    if (lossStreakCounter >= 9) {
+        finalSide = aiPrediction;
+        decisionReason = `📉 Loss Streak Follow: AI ${lossStreakCounter} ပွဲဆက်မှား → AI အတိုင်းထိုး`;
+    }
+    else if (winStreakCounter >= 9) {
+        finalSide = aiPrediction === "Big" ? "Small" : "Big";
+        decisionReason = `📈 Win Streak Reverse: AI ${winStreakCounter} ပွဲဆက်မှန် → ပြောင်းပြန်ထိုး`;
+    }
+    else if (bigStreak >= 5) {
         finalSide = "Small";
         decisionReason = `🔥 Big ${bigStreak} ပွဲဆက် → Small ပြောင်းထိုး`;
     } else if (smallStreak >= 5) {
@@ -1350,7 +1497,9 @@ function aiBrainDecide(data, history, realSide, realNumber) {
             bigStreak: bigStreak,
             smallStreak: smallStreak,
             patternRecovery: patternRecovery,
-            patternAccuracy: patternAnalysis ? patternAnalysis.patternAccuracy : 0
+            patternAccuracy: patternAnalysis ? patternAnalysis.patternAccuracy : 0,
+            lossStreakCounter: lossStreakCounter,
+            winStreakCounter: winStreakCounter
         }
     };
 }
@@ -1874,34 +2023,53 @@ async function sendStatusNotification(chatId, userData) {
         const currentStep = (userData.currentBetStep || 0) + 1;
         const totalSteps = userData.betPlan?.length || 1;
         
-        // Get pattern memory stats
         const patternAnalysis = analyzePatternMemory(chatId);
         
-        let statusMsg = `📊 *${platformEmoji} ${platformName} - ${nickname} Status*\n`;
+        let statusMsg = `💥 ${platformEmoji} *${platformName} - ${nickname} VIP SIGNAL* 💥\n`;
         statusMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        statusMsg += `${modeEmoji} *Mode:* ${mode}\n`;
-        statusMsg += `📋 *Bet Plan:* ${betPlanDisplay}\n`;
-        statusMsg += `🏆 *Stop Limit:* ${userData.stopLimit || 0}\n`;
-        statusMsg += `⚠️ *Loss Start:* ${userData.lossStartLimit || 1}\n`;
-        statusMsg += `📈 *Current Step:* ${currentStep}/${totalSteps}\n`;
-        statusMsg += `✅ *Session Wins:* ${userData.sessionWins || 0}/${userData.stopLimit || 0}\n`;
-        statusMsg += `🏆 *Total Wins:* ${userData.totalWins || 0}\n`;
-        statusMsg += `💰 *Total Profit:* ${(userData.totalProfit || 0).toFixed(2)} MMK\n`;
-        statusMsg += `🏦 *Balance:* ${(userData.currentBalance || 0).toFixed(2)} MMK\n`;
-        statusMsg += `📉 *${lossStreak}*\n`;
-        statusMsg += `🔥 *Big Streak:* ${userData.bigStreakCount || 0} ပွဲ\n`;
-        statusMsg += `🌄 *Small Streak:* ${userData.smallStreakCount || 0} ပွဲ\n`;
+        
+        const latestLog = userData.aiLogs[0] || {};
+        const latestIssue = userData.last_issue ? userData.last_issue.slice(-5) : 'N/A';
+        const latestResult = latestLog.result || 'N/A';
+        const latestNumber = latestLog.number || 'N/A';
+        const aiPred = userData.last_pred || 'N/A';
+        
+        statusMsg += `🗓 Period: ${userData.last_issue || 'N/A'}\n`;
+        statusMsg += `🎲 Result: ${latestResult} (${latestNumber})\n`;
+        statusMsg += `🤖 AI Pred: ${aiPred}\n`;
+        statusMsg += `📊 Mode: ${modeEmoji} ${mode}\n`;
+        statusMsg += `💰 Profit: ${(userData.totalProfit || 0).toFixed(2)} MMK\n`;
+        statusMsg += `🏦 Balance: ${(userData.currentBalance || 0).toFixed(2)} MMK\n`;
+        statusMsg += `🏆 Wins: ${userData.sessionWins || 0}/${userData.stopLimit || 0}\n`;
+        statusMsg += `📉 ${lossStreak}\n`;
+        statusMsg += `🔥 Big Streak: ${userData.bigStreakCount || 0} ပွဲ\n`;
+        statusMsg += `🌄 Small Streak: ${userData.smallStreakCount || 0} ပွဲ\n`;
         if (patternAnalysis && patternAnalysis.totalPatterns > 0) {
-            statusMsg += `🧠 *Pattern Memory:* ${patternAnalysis.totalPatterns} ပွဲ (Acc: ${patternAnalysis.patternAccuracy.toFixed(0)}%)\n`;
+            statusMsg += `🧠 Pattern Memory: ${patternAnalysis.totalPatterns} ပွဲ (Acc: ${patternAnalysis.patternAccuracy.toFixed(0)}%)\n`;
             if (patternAnalysis.lastUpdate) {
-                statusMsg += `🕐 *Last Update:* ${new Date(patternAnalysis.lastUpdate).toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}\n`;
+                statusMsg += `🕐 Last Update: ${new Date(patternAnalysis.lastUpdate).toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}\n`;
             }
         }
-        if (userData.brainStats?.currentBestMode) {
-            statusMsg += `🧠 *Best Mode:* ${userData.brainStats.currentBestMode}\n`;
+        if (userData.lossStreakCounter >= 9) {
+            statusMsg += `📉 Loss Streak Counter: ${userData.lossStreakCounter} ပွဲ\n`;
+        }
+        if (userData.winStreakCounter >= 9) {
+            statusMsg += `📈 Win Streak Counter: ${userData.winStreakCounter} ပွဲ\n`;
         }
         statusMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        statusMsg += `🕐 *အချိန်:* ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}`;
+        
+        const nextIssue = await getNextIssue(chatId);
+        const mmTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Yangon', hour: '2-digit', minute: '2-digit', hour12: false });
+        statusMsg += `🚀 Next: ${nextIssue ? nextIssue.slice(-5) : 'N/A'} (${mmTime})\n`;
+        statusMsg += `🦸 ခန့်မှန်း: ${aiPred === "Big" ? "ကြီး (BIG)" : "သေး (SMALL)"}\n`;
+        
+        if (userData.consecutiveLosses > 0) {
+            statusMsg += `⚠️ လက်ရှိအမှားဆက်: ${userData.consecutiveLosses} ပွဲ`;
+            if (userData.consecutiveLosses >= 7) statusMsg += ` (7 ပွဲဆက်မှား - သတိထားပါ)`;
+            statusMsg += `\n`;
+        }
+        statusMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        statusMsg += `${formatAIHistoryForVIP(userData.aiLogs, 50)}`;
 
         await statusBot.sendMessage(chatId, statusMsg, { parse_mode: "Markdown" });
         console.log(`✅ Status notification sent to ${chatId}`);
@@ -2164,6 +2332,7 @@ async function monitoringLoop(chatId) {
     let lossStreakDetails = [];
     let wasInLossStreak = false;
     let lastStatusSent = null;
+    let statusCounter = 0;
 
     while (true) {
         let data = getUserData(chatId);
@@ -2187,7 +2356,6 @@ async function monitoringLoop(chatId) {
 
                     const memoryResult = updateSmartMemory(chatId, data, realSide, realNumber, data.last_pred || "Big");
                     
-                    // Update pattern memory from website directly
                     updatePatternMemory(chatId, data, realSide, realNumber, data.last_pred || "Big");
 
                     let pendingBet = data.betHistory.find(b => b.status === "⏳ Pending" && b.issue === currentIssue.slice(-5));
@@ -2405,10 +2573,10 @@ async function monitoringLoop(chatId) {
                     previousLossStreak = currentLossStreak;
 
                     // ========== SEND STATUS NOTIFICATION ==========
-                    const now = Date.now();
-                    if (!lastStatusSent || (now - lastStatusSent) > 300000) {
+                    statusCounter++;
+                    if (statusCounter >= 10) {
                         await sendStatusNotification(chatId, data);
-                        lastStatusSent = now;
+                        statusCounter = 0;
                     }
 
                     // ========== AUTO BET LOGIC ==========
@@ -2417,25 +2585,29 @@ async function monitoringLoop(chatId) {
                         let betAmount = data.betPlan[data.currentBetStep] || 10;
                         let betReason = "";
                         let ensembleMethod = null;
+                        let modeName = "";
                         
-                        // Get dual predictions for display
                         const dualPred = getDualPredictions(data, history, realSide, realNumber);
 
                         if (data.autoMode === 'follow') {
                             betSide = realSide;
                             betReason = `🔄 Follow - ${realSide} လိုက်ထိုး`;
+                            modeName = '🔄 Follow';
                         } else if (data.autoMode === 'reverse') {
                             betSide = realSide === "Big" ? "Small" : "Big";
                             betReason = `🔃 Reverse - ${realSide} ထွက်၍ ပြောင်းပြန်ထိုး`;
+                            modeName = '🔃 Reverse';
                         } else if (data.autoMode === 'ai_correction') {
                             if (data.consecutiveLosses >= data.lossStartLimit) {
                                 betSide = data.last_pred;
                                 betReason = `🤖 AI Correction - ${data.consecutiveLosses} ပွဲဆက်မှား၍ ထိုး`;
+                                modeName = '🤖 AI Correction';
                             }
                         } else if (data.autoMode === 'emerdlist') {
                             const pred = await getEmerdListPrediction(chatId);
                             betSide = pred.prediction;
                             betReason = `🧠 GetEmerdList - ${pred.reason}`;
+                            modeName = '🧠 GetEmerdList';
                         } else if (data.autoMode === 'hybrid') {
                             const aiHistory = data.aiLogs || [];
                             const recentAI = aiHistory.slice(0, 20);
@@ -2455,11 +2627,13 @@ async function monitoringLoop(chatId) {
                                 betSide = data.last_pred;
                                 betReason = `🧬 Hybrid: AI ${(aiAccuracy * 100).toFixed(0)}% မှန် → AI အတိုင်းထိုး`;
                             }
+                            modeName = '🧬 Smart Hybrid';
                         } else if (data.autoMode === 'ai_brain') {
                             const brainDecision = aiBrainDecide(data, history, realSide, realNumber);
                             betSide = brainDecision.side;
                             betReason = brainDecision.reason;
                             betReason += `\n📊 AIမှန်:${brainDecision.stats.aiAccuracy20} | AIမှားဆက်:${brainDecision.stats.aiLossStreak} | Web:${brainDecision.stats.websiteStreak} | BigStreak:${brainDecision.stats.bigStreak} SmallStreak:${brainDecision.stats.smallStreak}`;
+                            modeName = '🧠 AI Brain';
                         } else if (data.autoMode === 'cautious') {
                             const histForMarkov = history.slice(0, 30).map(i => getSideFromNumber(i.number));
                             const markov = markovPredict(histForMarkov, 3);
@@ -2481,6 +2655,7 @@ async function monitoringLoop(chatId) {
                                     await bot.sendMessage(chatId, `⚠️ Cautious: AI (${data.last_pred}) vs Markov (${markov.prediction}) ကွဲနေ၍ ကျော်ပါမည်`);
                                 }
                             }
+                            modeName = '🧠 Cautious Brain';
                         } else if (data.autoMode === 'ensemble') {
                             const ensembleResult = await ensemblePredictor.predict(data, history, realSide, realNumber);
                             betSide = ensembleResult.side;
@@ -2502,13 +2677,15 @@ async function monitoringLoop(chatId) {
                             
                             await bot.sendMessage(chatId, betReason, { parse_mode: "Markdown" });
                             betReason = `Ensemble Ultra: ${ensembleResult.side} (${ensembleResult.confidence.toFixed(0)}%)`;
+                            modeName = '🧠 Ensemble Ultra';
                         }
-                        // ========== NEW MODE 9: AI CORRECTION 2 (No loss needed) ==========
+                        // ========== MODE 9: AI CORRECTION 2 ==========
                         else if (data.autoMode === 'ai_correction2') {
                             betSide = data.last_pred || realSide;
                             betReason = `🤖 AI Correction 2 - ပွဲဆက်မမှားလဲထိုး (AI: ${betSide})`;
+                            modeName = '🤖 AI Correction 2';
                         }
-                        // ========== NEW MODE 10: BIG STREAK FOLLOW ==========
+                        // ========== MODE 10: BIG STREAK FOLLOW ==========
                         else if (data.autoMode === 'big_streak_follow') {
                             const bigStreak = data.bigStreakCount || 0;
                             const smallStreak = data.smallStreakCount || 0;
@@ -2529,19 +2706,25 @@ async function monitoringLoop(chatId) {
                                 betSide = data.last_pred || realSide;
                                 betReason = `🧠 Big Streak Follow - AI အတိုင်းထိုး (${betSide})`;
                             }
+                            modeName = '🔥 Big Streak Follow';
                         }
-                        // ========== NEW MODE 11: PATTERN RECOVERY ==========
+                        // ========== MODE 11: PATTERN RECOVERY ==========
                         else if (data.autoMode === 'pattern_recovery') {
                             const patternAnalysis = analyzePatternMemory(chatId);
                             const bigStreak = data.bigStreakCount || 0;
                             const smallStreak = data.smallStreakCount || 0;
+                            const lossStreakCounter = data.lossStreakCounter || 0;
+                            const winStreakCounter = data.winStreakCounter || 0;
                             
-                            // Check if we're in a recovery situation (many wins followed by losses)
-                            const recentPatterns = patternAnalysis && patternAnalysis.totalPatterns > 0 ? patternAnalysis : null;
-                            
-                            if (recentPatterns && recentPatterns.recoveryChance > 70 && data.consecutiveLosses >= 2) {
+                            if (lossStreakCounter >= 9) {
                                 betSide = data.last_pred || realSide;
-                                betReason = `🧠 Pattern Recovery: AI ${data.consecutiveLosses}ပွဲမှား + Recovery Chance ${recentPatterns.recoveryChance.toFixed(0)}% → AI ပြန်မှန်ချိန်`;
+                                betReason = `📉 Loss Streak Follow: AI ${lossStreakCounter} ပွဲဆက်မှား → AI အတိုင်းထိုး`;
+                            } else if (winStreakCounter >= 9) {
+                                betSide = data.last_pred === "Big" ? "Small" : "Big";
+                                betReason = `📈 Win Streak Reverse: AI ${winStreakCounter} ပွဲဆက်မှန် → ပြောင်းပြန်ထိုး`;
+                            } else if (patternAnalysis && patternAnalysis.recoveryChance > 70 && data.consecutiveLosses >= 2) {
+                                betSide = data.last_pred || realSide;
+                                betReason = `🧠 Pattern Recovery: AI ${data.consecutiveLosses}ပွဲမှား + Recovery Chance ${patternAnalysis.recoveryChance.toFixed(0)}% → AI ပြန်မှန်ချိန်`;
                             } else if (bigStreak >= 4) {
                                 betSide = "Small";
                                 betReason = `🔥 Big ${bigStreak} ပွဲဆက် → Small ပြောင်းထိုး (Pattern Recovery)`;
@@ -2555,14 +2738,47 @@ async function monitoringLoop(chatId) {
                                 betSide = data.last_pred || realSide;
                                 betReason = `🧠 Pattern Recovery: AI အတိုင်းထိုး (${betSide})`;
                             }
+                            modeName = '🧠 Pattern Recovery';
+                        }
+                        // ========== MODE 12: LOSS STREAK FOLLOW ==========
+                        else if (data.autoMode === 'loss_streak_follow') {
+                            const lossStreakCounter = data.lossStreakCounter || 0;
+                            
+                            if (lossStreakCounter >= 9) {
+                                betSide = data.last_pred || realSide;
+                                betReason = `📉 Loss Streak Follow: AI ${lossStreakCounter} ပွဲဆက်မှား → AI အတိုင်းထိုး`;
+                            } else {
+                                betSide = data.last_pred || realSide;
+                                betReason = `📉 Loss Streak Follow: AI အတိုင်းထိုး (${betSide}) - ${lossStreakCounter}/9 ပွဲ`;
+                            }
+                            modeName = '📉 Loss Streak Follow';
+                        }
+                        // ========== MODE 13: WIN STREAK REVERSE ==========
+                        else if (data.autoMode === 'win_streak_reverse') {
+                            const winStreakCounter = data.winStreakCounter || 0;
+                            
+                            if (winStreakCounter >= 9) {
+                                betSide = data.last_pred === "Big" ? "Small" : "Big";
+                                betReason = `📈 Win Streak Reverse: AI ${winStreakCounter} ပွဲဆက်မှန် → ပြောင်းပြန်ထိုး`;
+                            } else {
+                                betSide = data.last_pred === "Big" ? "Small" : "Big";
+                                betReason = `📈 Win Streak Reverse: ပြောင်းပြန်ထိုး (${betSide}) - ${winStreakCounter}/9 ပွဲ`;
+                            }
+                            modeName = '📈 Win Streak Reverse';
                         }
 
                         if (betSide) {
+                            // ========== SEND TO MODE BOTS ==========
+                            if (modeName && (modeName === '🧬 Smart Hybrid' || modeName === '🔥 Big Streak Follow' || modeName === '🧠 Pattern Recovery' || modeName === '📉 Loss Streak Follow' || modeName === '📈 Win Streak Reverse')) {
+                                const confidence = 70; // default confidence
+                                const details = `AI Pred: ${data.last_pred} | Real: ${realSide} | Streak: ${data.bigStreakCount || 0} Big / ${data.smallStreakCount || 0} Small`;
+                                await sendToModeBots(chatId, data, modeName, betSide, confidence, betReason, details);
+                            }
+
                             await checkBalance(chatId);
                             data = getUserData(chatId);
                             
                             if (data.autoMode !== 'ensemble') {
-                                // Show dual predictions
                                 let dualMsg = `📊 *AI ခန့်မှန်း ၂ မျိုး*\n━━━━━━━━━━━━━━━━\n`;
                                 dualMsg += `🤖 *Normal AI:* ${dualPred.normal.side} (Streak: ${dualPred.normal.dragon})\n`;
                                 if (dualPred.pattern) {
@@ -2570,6 +2786,12 @@ async function monitoringLoop(chatId) {
                                 }
                                 if (dualPred.bigStreak) {
                                     dualMsg += `🔥 *Streak Follow:* ${dualPred.bigStreak.side} (${dualPred.bigStreak.details})\n`;
+                                }
+                                if (dualPred.lossStreak) {
+                                    dualMsg += `📉 *Loss Streak Follow:* ${dualPred.lossStreak.side} (${dualPred.lossStreak.details})\n`;
+                                }
+                                if (dualPred.winStreak) {
+                                    dualMsg += `📈 *Win Streak Reverse:* ${dualPred.winStreak.side} (${dualPred.winStreak.details})\n`;
                                 }
                                 if (dualPred.patternAccuracy > 0) {
                                     dualMsg += `📊 *Pattern Accuracy:* ${dualPred.patternAccuracy.toFixed(0)}% (${dualPred.totalPatterns} ပွဲ)\n`;
@@ -2613,6 +2835,8 @@ async function monitoringLoop(chatId) {
                         else if (data.autoMode === 'ai_correction2') modeText = "🤖 AI Correction 2";
                         else if (data.autoMode === 'big_streak_follow') modeText = "🔥 Big Streak Follow";
                         else if (data.autoMode === 'pattern_recovery') modeText = "🧠 Pattern Recovery";
+                        else if (data.autoMode === 'loss_streak_follow') modeText = "📉 Loss Streak Follow";
+                        else if (data.autoMode === 'win_streak_reverse') modeText = "📈 Win Streak Reverse";
                     }
 
                     const platformName = data.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
@@ -2633,13 +2857,19 @@ async function monitoringLoop(chatId) {
                     statusMsg += `🔥 Big Streak: ${data.bigStreakCount || 0} ပွဲ\n`;
                     statusMsg += `🌄 Small Streak: ${data.smallStreakCount || 0} ပွဲ\n`;
                     
-                    // Show pattern memory stats
                     const patternAnalysis = analyzePatternMemory(chatId);
                     if (patternAnalysis && patternAnalysis.totalPatterns > 0) {
                         statusMsg += `🧠 Pattern Memory: ${patternAnalysis.totalPatterns} ပွဲ (Acc: ${patternAnalysis.patternAccuracy.toFixed(0)}%)\n`;
                     }
+                    
+                    if (data.lossStreakCounter >= 9) {
+                        statusMsg += `📉 Loss Streak Counter: ${data.lossStreakCounter} ပွဲ\n`;
+                    }
+                    if (data.winStreakCounter >= 9) {
+                        statusMsg += `📈 Win Streak Counter: ${data.winStreakCounter} ပွဲ\n`;
+                    }
 
-                    if ((data.autoMode === 'ai_brain' || data.autoMode === 'ensemble' || data.autoMode === 'pattern_recovery') && data.brainStats) {
+                    if ((data.autoMode === 'ai_brain' || data.autoMode === 'ensemble' || data.autoMode === 'pattern_recovery' || data.autoMode === 'loss_streak_follow' || data.autoMode === 'win_streak_reverse') && data.brainStats) {
                         statusMsg += `🧠 Best Mode: ${data.brainStats.currentBestMode || 'N/A'}\n`;
                     }
                     if (data.autoMode === 'ensemble') {
@@ -2721,6 +2951,8 @@ const autoModeMenu = {
             ["🤖 AI Correction 2 (No Loss)"],
             ["🔥 Big Streak Follow"],
             ["🧠 Pattern Recovery"],
+            ["📉 Loss Streak Follow (9+ Loss)"],
+            ["📈 Win Streak Reverse (9+ Win)"],
             ["🔙 Main Menu"]
         ],
         resize_keyboard: true
@@ -2737,6 +2969,19 @@ const platformMenu = {
         resize_keyboard: true
     }
 };
+
+// ========== MODE BOT MESSAGE HANDLERS ==========
+Object.keys(MODE_BOTS).forEach(key => {
+    const config = MODE_BOTS[key];
+    const botInstance = modeBots[key];
+    
+    botInstance.on('message', async (msg) => {
+        const chatId = msg.chat.id.toString();
+        if (msg.text === '/start') {
+            await botInstance.sendMessage(chatId, `📊 *${config.name} Bot*\n━━━━━━━━━━━━━━━━\n✅ ဤ Bot သည် ${config.name} မုဒ်၏ ခန့်မှန်းချက်များကို အသိပေးပါမည်။\n✅ အလိုအလျောက် ပို့ဆောင်ပေးပါမည်။`, { parse_mode: "Markdown" });
+        }
+    });
+});
 
 // ========== MESSAGE HANDLER ==========
 bot.on('message', async (msg) => {
@@ -2759,6 +3004,8 @@ bot.on('message', async (msg) => {
         data.currentBalance = 0;
         data.bigStreakCount = 0;
         data.smallStreakCount = 0;
+        data.lossStreakCounter = 0;
+        data.winStreakCounter = 0;
         data.patternLastUpdate = null;
         data.patternAccuracy = 0;
         data.brainStats = {
@@ -2774,7 +3021,9 @@ bot.on('message', async (msg) => {
                 ensemble: { wins: 0, losses: 0 },
                 ai_correction2: { wins: 0, losses: 0 },
                 big_streak_follow: { wins: 0, losses: 0 },
-                pattern_recovery: { wins: 0, losses: 0 }
+                pattern_recovery: { wins: 0, losses: 0 },
+                loss_streak_follow: { wins: 0, losses: 0 },
+                win_streak_reverse: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -2787,18 +3036,15 @@ bot.on('message', async (msg) => {
         delete data.nickname;
         saveUserData(chatId, data);
 
-        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot v4.3*\n━━━━━━━━━━━━━━━━\n`;
+        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot v4.5*\n━━━━━━━━━━━━━━━━\n`;
         welcomeMsg += `ကျေးဇူးပြု၍ Platform ရွေးချယ်ပါ:\n\n`;
         welcomeMsg += `🔥 *BigWin* - WinGo 30 Sec Game\n`;
         welcomeMsg += `🎯 *CK Lottery* - CK Lottery 30 Sec Game\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
-        welcomeMsg += `✨ *New Features v4.3:*\n`;
-        welcomeMsg += `• Pattern Memory (500 games from website)\n`;
-        welcomeMsg += `• Pattern Accuracy Tracking\n`;
-        welcomeMsg += `• 11 Auto Modes (NEW: Pattern Recovery)\n`;
-        welcomeMsg += `• AI ခန့်မှန်း ၂ ပုံခွဲ\n`;
-        welcomeMsg += `• Big/Small Streak Tracking\n`;
-        welcomeMsg += `• Real-time Pattern Update\n`;
+        welcomeMsg += `✨ *New Features v4.5:*\n`;
+        welcomeMsg += `• 5 Mode Bots (Smart Hybrid, Big Streak Follow, Pattern Recovery, Loss Streak Follow, Win Streak Reverse)\n`;
+        welcomeMsg += `• Each mode sends predictions to dedicated bots\n`;
+        welcomeMsg += `• Full VIP SIGNAL format for each mode\n`;
 
         await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown", ...platformMenu });
         return;
@@ -2818,6 +3064,8 @@ bot.on('message', async (msg) => {
         data.currentBalance = 0;
         data.bigStreakCount = 0;
         data.smallStreakCount = 0;
+        data.lossStreakCounter = 0;
+        data.winStreakCounter = 0;
         data.patternLastUpdate = null;
         data.patternAccuracy = 0;
         data.brainStats = {
@@ -2833,7 +3081,9 @@ bot.on('message', async (msg) => {
                 ensemble: { wins: 0, losses: 0 },
                 ai_correction2: { wins: 0, losses: 0 },
                 big_streak_follow: { wins: 0, losses: 0 },
-                pattern_recovery: { wins: 0, losses: 0 }
+                pattern_recovery: { wins: 0, losses: 0 },
+                loss_streak_follow: { wins: 0, losses: 0 },
+                win_streak_reverse: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -2864,6 +3114,8 @@ bot.on('message', async (msg) => {
         data.currentBalance = 0;
         data.bigStreakCount = 0;
         data.smallStreakCount = 0;
+        data.lossStreakCounter = 0;
+        data.winStreakCounter = 0;
         data.patternLastUpdate = null;
         data.patternAccuracy = 0;
         data.brainStats = {
@@ -2879,7 +3131,9 @@ bot.on('message', async (msg) => {
                 ensemble: { wins: 0, losses: 0 },
                 ai_correction2: { wins: 0, losses: 0 },
                 big_streak_follow: { wins: 0, losses: 0 },
-                pattern_recovery: { wins: 0, losses: 0 }
+                pattern_recovery: { wins: 0, losses: 0 },
+                loss_streak_follow: { wins: 0, losses: 0 },
+                win_streak_reverse: { wins: 0, losses: 0 }
             },
             currentBestMode: null,
             lastModeSwitch: null,
@@ -2899,18 +3153,15 @@ bot.on('message', async (msg) => {
     if (text === '🔙 Back') {
         data.platform = null;
         saveUserData(chatId, data);
-        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot v4.3*\n━━━━━━━━━━━━━━━━\n`;
+        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot v4.5*\n━━━━━━━━━━━━━━━━\n`;
         welcomeMsg += `ကျေးဇူးပြု၍ Platform ရွေးချယ်ပါ:\n\n`;
         welcomeMsg += `🔥 *BigWin* - WinGo 30 Sec Game\n`;
         welcomeMsg += `🎯 *CK Lottery* - CK Lottery 30 Sec Game\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
-        welcomeMsg += `✨ *New Features v4.3:*\n`;
-        welcomeMsg += `• Pattern Memory (500 games from website)\n`;
-        welcomeMsg += `• Pattern Accuracy Tracking\n`;
-        welcomeMsg += `• 11 Auto Modes (NEW: Pattern Recovery)\n`;
-        welcomeMsg += `• AI ခန့်မှန်း ၂ ပုံခွဲ\n`;
-        welcomeMsg += `• Big/Small Streak Tracking\n`;
-        welcomeMsg += `• Real-time Pattern Update\n`;
+        welcomeMsg += `✨ *New Features v4.5:*\n`;
+        welcomeMsg += `• 5 Mode Bots\n`;
+        welcomeMsg += `• Each mode sends predictions to dedicated bots\n`;
+        welcomeMsg += `• Full VIP SIGNAL format\n`;
 
         await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown", ...platformMenu });
         return;
@@ -2918,18 +3169,14 @@ bot.on('message', async (msg) => {
 
     // ========== CHECK PLATFORM SELECTED ==========
     if (!data.platform && text !== '/start' && text !== '🔥 BigWin' && text !== '🎯 CK Lottery' && text !== '🔙 Back') {
-        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot v4.3*\n━━━━━━━━━━━━━━━━\n`;
+        let welcomeMsg = `🎯 *WinGo Multi-Platform Bot v4.5*\n━━━━━━━━━━━━━━━━\n`;
         welcomeMsg += `ကျေးဇူးပြု၍ Platform ရွေးချယ်ပါ:\n\n`;
         welcomeMsg += `🔥 *BigWin* - WinGo 30 Sec Game\n`;
         welcomeMsg += `🎯 *CK Lottery* - CK Lottery 30 Sec Game\n`;
         welcomeMsg += `━━━━━━━━━━━━━━━━\n`;
-        welcomeMsg += `✨ *New Features v4.3:*\n`;
-        welcomeMsg += `• Pattern Memory (500 games from website)\n`;
-        welcomeMsg += `• Pattern Accuracy Tracking\n`;
-        welcomeMsg += `• 11 Auto Modes (NEW: Pattern Recovery)\n`;
-        welcomeMsg += `• AI ခန့်မှန်း ၂ ပုံခွဲ\n`;
-        welcomeMsg += `• Big/Small Streak Tracking\n`;
-        welcomeMsg += `• Real-time Pattern Update\n`;
+        welcomeMsg += `✨ *New Features v4.5:*\n`;
+        welcomeMsg += `• 5 Mode Bots\n`;
+        welcomeMsg += `• Each mode sends predictions to dedicated bots\n`;
 
         await bot.sendMessage(chatId, welcomeMsg, { parse_mode: "Markdown", ...platformMenu });
         return;
@@ -3038,8 +3285,6 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, activeSignals, { parse_mode: "Markdown" });
         return;
     }
-
-    // Nickname removed - no Set Nickname command
 
     if (data.settingMode) {
         if (data.settingMode === "betplan") {
@@ -3150,25 +3395,34 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, ensembleMsg, { parse_mode: "Markdown", ...mainMenu });
     }
     
-    // ========== MODE 9: AI CORRECTION 2 ==========
     if (text === "🤖 AI Correction 2 (No Loss)") {
         data.autoRunning = true; data.autoMode = 'ai_correction2'; data.currentBetStep = 0; data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false; data.sessionWins = 0;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ *AI Correction 2 Mode Started!*\n━━━━━━━━━━━━━━━━\n🤖 ပွဲဆက်မမှားလဲ AI ခန့်မှန်းချက်အတိုင်း ထိုးပါမည်။\n📌 ပုံမှန် AI Correction နဲ့ မတူပါ။\n📌 ပွဲဆက်မှားနေချိန်မှာလည်း ဆက်ထိုးပါမည်။\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu });
     }
     
-    // ========== MODE 10: BIG STREAK FOLLOW ==========
     if (text === "🔥 Big Streak Follow") {
         data.autoRunning = true; data.autoMode = 'big_streak_follow'; data.currentBetStep = 0; data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false; data.sessionWins = 0;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ *Big Streak Follow Mode Started!*\n━━━━━━━━━━━━━━━━\n🔥 Big/Small Streak ကိုကြည့်ပြီး ထိုးပါမည်။\n📌 Big ၃+ ပွဲဆက် → Small ပြောင်းထိုး\n📌 Small ၃+ ပွဲဆက် → Big ပြောင်းထိုး\n📌 ၅+ ပွဲဆက်ရင် ပိုပြီးသေချာထိုး\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu });
     }
     
-    // ========== MODE 11: PATTERN RECOVERY ==========
     if (text === "🧠 Pattern Recovery") {
         data.autoRunning = true; data.autoMode = 'pattern_recovery'; data.currentBetStep = 0; data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false; data.sessionWins = 0;
         saveUserData(chatId, data);
         await bot.sendMessage(chatId, `✅ *Pattern Recovery Mode Started!*\n━━━━━━━━━━━━━━━━\n🧠 Pattern Memory ကိုကြည့်ပြီး Recovery အချိန်ကိုဖမ်းပါမည်။\n📌 အမှန်တွေများလာပြီး အမှားလာချိန်ကို ဖမ်းပါမည်။\n📌 AI ပြန်မှန်ချိန်ကို Pattern Memory နဲ့ ခန့်မှန်းပါမည်။\n📌 ၃+ ပွဲဆက်မှားရင် Recovery Mode စတင်ပါမည်။\n📌 ၄+ ပွဲဆက်ကျရင် ပြောင်းပြန်ထိုးပါမည်။\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu });
+    }
+    
+    if (text === "📉 Loss Streak Follow (9+ Loss)") {
+        data.autoRunning = true; data.autoMode = 'loss_streak_follow'; data.currentBetStep = 0; data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false; data.sessionWins = 0;
+        saveUserData(chatId, data);
+        await bot.sendMessage(chatId, `✅ *Loss Streak Follow Mode Started!*\n━━━━━━━━━━━━━━━━\n📉 AI ၉ ပွဲဆက်မှားရင် AI အတိုင်းထိုးပါမည်။\n📌 ၉ ပွဲမပြည့်ခင် AI အတိုင်းထိုးနေမည်။\n📌 ၉ ပွဲပြည့်ရင် ပိုပြီးသေချာထိုးပါမည်။\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu });
+    }
+    
+    if (text === "📈 Win Streak Reverse (9+ Win)") {
+        data.autoRunning = true; data.autoMode = 'win_streak_reverse'; data.currentBetStep = 0; data.consecutiveWins = 0; data.consecutiveLosses = 0; data.manualBetLock = false; data.sessionWins = 0;
+        saveUserData(chatId, data);
+        await bot.sendMessage(chatId, `✅ *Win Streak Reverse Mode Started!*\n━━━━━━━━━━━━━━━━\n📈 AI ၉ ပွဲဆက်မှန်ရင် ပြောင်းပြန်ထိုးပါမည်။\n📌 ၉ ပွဲမပြည့်ခင် ပြောင်းပြန်ထိုးနေမည်။\n📌 ၉ ပွဲပြည့်ရင် ပိုပြီးသေချာထိုးပါမည်။\n\nStop Limit: ${data.stopLimit} ပွဲနိုင်\nBet Plan: ${data.betPlan.join(' → ')}`, { parse_mode: "Markdown", ...mainMenu });
     }
 
     if (text === "🛑 Stop Auto") {
@@ -3202,13 +3456,19 @@ bot.on('message', async (msg) => {
         const lossStreak = formatLossStreakShort(data.aiLogs);
         let status = `📊 *${nickname} - Status*\n━━━━━━━━━━━━━━━━\n${modeEmoji} Mode: ${mode}\n📋 Bet Plan: ${data.betPlan.join(' → ')}\n🏆 Stop Limit: ${data.stopLimit}\n⚠️ Loss Start: ${data.lossStartLimit}\n📈 Current Step: ${(data.currentBetStep || 0) + 1}/${data.betPlan.length}\n✅ Session Wins: ${data.sessionWins}/${data.stopLimit}\n🏆 Total Wins: ${data.totalWins}\n💰 Total Profit: ${(data.totalProfit || 0).toFixed(2)} MMK\n🏦 Balance: ${(data.currentBalance || 0).toFixed(2)} MMK\n📉 ${lossStreak}\n🔥 Big Streak: ${data.bigStreakCount || 0} ပွဲ\n🌄 Small Streak: ${data.smallStreakCount || 0} ပွဲ\n`;
         
-        // Show pattern memory stats
         const patternAnalysis = analyzePatternMemory(chatId);
         if (patternAnalysis && patternAnalysis.totalPatterns > 0) {
             status += `🧠 Pattern Memory: ${patternAnalysis.totalPatterns} ပွဲ (Acc: ${patternAnalysis.patternAccuracy.toFixed(0)}%)\n`;
             if (patternAnalysis.lastUpdate) {
                 status += `🕐 Last Update: ${new Date(patternAnalysis.lastUpdate).toLocaleString('en-US', { timeZone: 'Asia/Yangon' })}\n`;
             }
+        }
+        
+        if (data.lossStreakCounter >= 9) {
+            status += `📉 Loss Streak Counter: ${data.lossStreakCounter} ပွဲ\n`;
+        }
+        if (data.winStreakCounter >= 9) {
+            status += `📈 Win Streak Counter: ${data.winStreakCounter} ပွဲ\n`;
         }
         
         if (data.consecutiveLosses > 0) status += `⚠️ လက်ရှိအမှားဆက်: ${data.consecutiveLosses} ပွဲ\n`;
@@ -3301,7 +3561,7 @@ bot.on('message', async (msg) => {
             const platformName = data.platform === 'BIGWIN' ? 'BigWin' : 'CK Lottery';
             const platformEmoji = data.platform === 'BIGWIN' ? '🔥' : '🎯';
             
-            await bot.sendMessage(chatId, `✅ ${platformEmoji} ${platformName} Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\n✨ *Features v4.3:*\n• Pattern Memory (500 games from website)\n• Pattern Accuracy Tracking\n• 11 Auto Modes\n• AI ခန့်မှန်း ၂ ပုံခွဲ\n• Big/Small Streak Tracking\n• Real-time Pattern Update\n\n📊 Loss Streak Stats: Available in Menu`, mainMenu);
+            await bot.sendMessage(chatId, `✅ ${platformEmoji} ${platformName} Login Success!\n\n🏦 လက်ကျန်ငွေ: ${(data.currentBalance || 0).toFixed(2)} MMK\n\n✨ *Features v4.5:*\n• 13 Auto Modes\n• 5 Mode Bots\n• Each mode sends predictions to dedicated bots\n• Full VIP SIGNAL format\n• Pattern Memory (500 games)\n\n📊 Loss Streak Stats: Available in Menu`, mainMenu);
         } else {
             await bot.sendMessage(chatId, "❌ Login Failed! နံပါတ်နှင့် Password ပြန်စစ်ပါ။");
             delete data.tempPhone;
@@ -3351,7 +3611,7 @@ bot.on('callback_query', async (query) => {
 // ========== HELP COMMAND ==========
 bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id.toString();
-    let helpText = `📖 *WinGo Pro Bot v4.3 - Multi-Platform*\n━━━━━━━━━━━━━━━━\n\n🤖 *Supported Platforms:*\n• 🔥 BigWin - WinGo 30 Sec Game\n• 🎯 CK Lottery - CK Lottery 30 Sec Game\n\n🤖 *11 Auto Modes:*\n1. 🔄 Follow\n2. 🔃 Reverse\n3. 🤖 AI Correction\n4. 🧠 GetEmerdList\n5. 🧬 Smart Hybrid\n6. 🧠 AI Brain\n7. 🧠 Cautious Brain\n8. 🧠 Ensemble Ultra\n9. 🤖 AI Correction 2 (No Loss)\n10. 🔥 Big Streak Follow\n11. 🧠 Pattern Recovery (NEW!)\n\n🧠 *AI Features:*\n• Pattern Memory (500 games from website)\n• Pattern Accuracy Tracking\n• AI ခန့်မှန်း ၂ ပုံခွဲ\n• Big/Small Streak Tracking\n• Real-time Pattern Update\n• Ensemble AI (8 Methods)\n• Kelly Criterion\n• Auto Weight Update\n\n📊 *Loss Streak Stats:*\n• အမှားဆက် (၂ ပွဲအထက်) စာရင်းအင်း\n• ဇယားဖြင့်ဖော်ပြခြင်း\n• အသေးစိတ်အားလုံးဖော်ပြခြင်း\n\n🔔 *Notification Bots:*\n• Loss Streak Bot\n• Status Bot (5 min interval)`;
+    let helpText = `📖 *WinGo Pro Bot v4.5 - Multi-Platform*\n━━━━━━━━━━━━━━━━\n\n🤖 *Supported Platforms:*\n• 🔥 BigWin - WinGo 30 Sec Game\n• 🎯 CK Lottery - CK Lottery 30 Sec Game\n\n🤖 *13 Auto Modes:*\n1. 🔄 Follow\n2. 🔃 Reverse\n3. 🤖 AI Correction\n4. 🧠 GetEmerdList\n5. 🧬 Smart Hybrid\n6. 🧠 AI Brain\n7. 🧠 Cautious Brain\n8. 🧠 Ensemble Ultra\n9. 🤖 AI Correction 2 (No Loss)\n10. 🔥 Big Streak Follow\n11. 🧠 Pattern Recovery\n12. 📉 Loss Streak Follow (9+ Loss)\n13. 📈 Win Streak Reverse (9+ Win)\n\n🤖 *Mode Bots:*\n• 🧬 Smart Hybrid Bot\n• 🔥 Big Streak Follow Bot\n• 🧠 Pattern Recovery Bot\n• 📉 Loss Streak Follow Bot\n• 📈 Win Streak Reverse Bot\n\n🧠 *AI Features:*\n• Pattern Memory (500 games)\n• Pattern Accuracy Tracking\n• AI ခန့်မှန်း ၂ ပုံခွဲ\n• Big/Small Streak Tracking\n• Loss/Win Streak Counter\n• Ensemble AI (8 Methods)\n• Kelly Criterion\n• Auto Weight Update\n\n📊 *Loss Streak Stats:*\n• အမှားဆက် (၂ ပွဲအထက်) စာရင်းအင်း\n• ဇယားဖြင့်ဖော်ပြခြင်း\n• အသေးစိတ်အားလုံးဖော်ပြခြင်း\n\n🔔 *Notification Bots:*\n• Loss Streak Bot\n• Status Bot\n• 5 Mode Bots`;
     await bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
 });
 
@@ -3369,6 +3629,8 @@ function getModeEmoji(mode) {
         case 'ai_correction2': return "🤖";
         case 'big_streak_follow': return "🔥";
         case 'pattern_recovery': return "🧠";
+        case 'loss_streak_follow': return "📉";
+        case 'win_streak_reverse': return "📈";
         default: return "⚪️";
     }
 }
@@ -3444,21 +3706,45 @@ http.createServer((req, res) => {
             }
         });
     } else {
-        res.writeHead(200);
-        res.end('WinGo Pro Bot v4.3 - Multi-Platform');
+        // Handle mode bot webhooks
+        let handled = false;
+        Object.keys(MODE_BOTS).forEach(key => {
+            const config = MODE_BOTS[key];
+            if (req.url === `/modebot${config.token}` && req.method === 'POST') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        modeBots[key].processUpdate(JSON.parse(body));
+                        res.writeHead(200);
+                        res.end(JSON.stringify({ ok: true }));
+                    } catch (e) {
+                        res.writeHead(400);
+                        res.end();
+                    }
+                });
+                handled = true;
+            }
+        });
+        if (!handled) {
+            res.writeHead(200);
+            res.end('WinGo Pro Bot v4.5 - Multi-Platform');
+        }
     }
 }).listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🧬 Ensemble Ultra AI: ACTIVE`);
     console.log(`📊 Kelly Criterion: ENABLED (Min: Bet Plan, Min: 10 MMK)`);
     console.log(`📊 Loss Streak Stats: ACTIVE`);
-    console.log(`📊 11 Auto Modes: ACTIVE`);
-    console.log(`📊 Pattern Memory: ACTIVE (500 games from website)`);
-    console.log(`📊 Pattern Accuracy: TRACKING`);
+    console.log(`📊 13 Auto Modes: ACTIVE`);
+    console.log(`📊 5 Mode Bots: ACTIVE`);
+    console.log(`📊 Pattern Memory: ACTIVE (500 games)`);
+    console.log(`📊 Loss/Win Streak Counter: ACTIVE`);
+    console.log(`📊 Status Bot: VIP SIGNAL format`);
     console.log(`📊 2-Way AI Prediction: ACTIVE`);
     console.log(`📊 Loss Bot Token: ${LOSS_BOT_TOKEN}`);
     console.log(`📊 Status Bot Token: ${STATUS_BOT_TOKEN}`);
     console.log(`📊 Multi-Platform: BigWin + CK Lottery`);
 });
 
-console.log("✅ WinGo Pro Bot v4.3 - Multi-Platform Ready");
+console.log("✅ WinGo Pro Bot v4.5 - Multi-Platform Ready");
