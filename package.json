@@ -1,16 +1,17 @@
 {
-  "name": "wingo-sniper-pro",
-  "version": "1.0.0",
-  "description": "WinGo Pro Bot - AI Brain v2",
-  "main": "bot.js",
+  "name": "wingo-pro-bot",
+  "version": "4.7.0",
+  "description": "WinGo Multi-Platform Telegram Bot for Railway",
+  "main": "server.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.64.0",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "node-telegram-bot-api": "^0.64.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "18.x"
   }
 }
